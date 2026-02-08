@@ -693,17 +693,54 @@ check_dependencies() {
     # Optional but recommended
     echo ""
     echo -e "  ${GRAY}Optional:${NC}"
-    
+
+    local optional_missing=()
+
     if check_command "jq"; then
         print_status "jq (JSON parsing)" "ok"
     else
         print_status "jq (JSON parsing) - not installed" "skip"
+        optional_missing+=("jq")
     fi
-    
+
     if check_command "ssh"; then
         print_status "ssh" "ok"
     else
         print_status "ssh - not installed" "warn"
+        optional_missing+=("openssh-client")
+    fi
+
+    # Show installation instructions for optional dependencies
+    if [[ ${#optional_missing[@]} -gt 0 ]]; then
+        echo ""
+        echo -e "  ${GRAY}To install optional dependencies:${NC}"
+
+        case "$pm" in
+            apt)
+                echo -e "    ${CYAN}sudo apt update && sudo apt install -y ${optional_missing[*]}${NC}"
+                ;;
+            brew)
+                echo -e "    ${CYAN}brew install ${optional_missing[*]}${NC}"
+                ;;
+            dnf)
+                echo -e "    ${CYAN}sudo dnf install -y ${optional_missing[*]}${NC}"
+                ;;
+            pacman)
+                echo -e "    ${CYAN}sudo pacman -S ${optional_missing[*]}${NC}"
+                ;;
+            *)
+                echo -e "    ${GRAY}Install: ${optional_missing[*]}${NC}"
+                ;;
+        esac
+
+        echo ""
+        echo -e "  ${GRAY}Benefits:${NC}"
+        if [[ " ${optional_missing[*]} " =~ " jq " ]]; then
+            echo -e "    ${GRAY}• jq: Better manifest parsing and validation${NC}"
+        fi
+        if [[ " ${optional_missing[*]} " =~ " openssh-client " ]]; then
+            echo -e "    ${GRAY}• ssh: Required for SSH key backup and Git authentication${NC}"
+        fi
     fi
     
     # Check if any required dependencies are missing
