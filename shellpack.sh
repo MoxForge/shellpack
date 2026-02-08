@@ -833,16 +833,19 @@ push_to_repo() {
         return 1
     }
 
-    if ! git add -A >> "$LOG_FILE" 2>&1; then
+    echo -e "  ${GRAY}Staging files...${NC}"
+    if ! git add -A 2>&1 | tee -a "$LOG_FILE"; then
         log "ERROR" "git add failed"
         echo -e "  ${RED}Failed to stage files${NC}" >&2
         return 1
     fi
 
-    if ! git commit -m "$message" >> "$LOG_FILE" 2>&1; then
+    echo -e "  ${GRAY}Creating commit...${NC}"
+    if ! git commit -m "$message" 2>&1 | tee -a "$LOG_FILE"; then
         # Check if there's nothing to commit
         if git diff --cached --quiet; then
             log "INFO" "No changes to commit"
+            echo -e "  ${YELLOW}No changes to commit${NC}"
         else
             log "WARN" "git commit returned non-zero but continuing"
         fi
@@ -850,18 +853,44 @@ push_to_repo() {
 
     # Try main branch first, then master
     echo -e "  ${GRAY}Pushing to remote...${NC}"
-    if timeout 60 git push -u origin main 2>&1 | tee -a "$LOG_FILE" | grep -q "Everything up-to-date\|Writing objects"; then
+    local push_output
+    local push_error
+    push_error=$(mktemp)
+
+    if push_output=$(timeout 60 git push -u origin main 2>"$push_error"); then
+        echo "$push_output" | tee -a "$LOG_FILE"
+        rm -f "$push_error"
         return 0
-    elif timeout 60 git push -u origin master 2>&1 | tee -a "$LOG_FILE" | grep -q "Everything up-to-date\|Writing objects"; then
+    elif grep -q "Everything up-to-date" "$push_error"; then
+        cat "$push_error" | tee -a "$LOG_FILE"
+        rm -f "$push_error"
         return 0
-    else
-        log "ERROR" "Push failed - check authentication and network"
-        echo -e "  ${RED}Push failed. Common issues:${NC}" >&2
-        echo -e "  ${YELLOW}• Check SSH key is added to GitHub/GitLab${NC}" >&2
-        echo -e "  ${YELLOW}• Verify repository URL is correct${NC}" >&2
-        echo -e "  ${YELLOW}• Check network connection${NC}" >&2
-        return 1
     fi
+
+    # Try master branch
+    if push_output=$(timeout 60 git push -u origin master 2>"$push_error"); then
+        echo "$push_output" | tee -a "$LOG_FILE"
+        rm -f "$push_error"
+        return 0
+    elif grep -q "Everything up-to-date" "$push_error"; then
+        cat "$push_error" | tee -a "$LOG_FILE"
+        rm -f "$push_error"
+        return 0
+    fi
+
+    # Push failed - show the actual error
+    log "ERROR" "Push failed - check authentication and network"
+    echo -e "  ${RED}Push failed with error:${NC}" >&2
+    cat "$push_error" | sed 's/^/  /' >&2
+    echo ""
+    echo -e "  ${RED}Common issues:${NC}" >&2
+    echo -e "  ${YELLOW}• SSH key not added to GitHub/GitLab${NC}" >&2
+    echo -e "  ${YELLOW}• Repository URL is incorrect${NC}" >&2
+    echo -e "  ${YELLOW}• No write access to repository${NC}" >&2
+    echo -e "  ${YELLOW}• Network connection issues${NC}" >&2
+
+    rm -f "$push_error"
+    return 1
 }
 
 #===============================================================================
@@ -1955,18 +1984,56 @@ do_backup() {
 
     local git_dir="$TEMP_DIR/git"
 
+    # Verify SSH key if using SSH URL
+    if [[ "$repo_url" =~ ^git@ ]]; then
+        echo -e "  ${GRAY}Verifying SSH connection...${NC}"
+        local ssh_host
+        ssh_host=$(echo "$repo_url" | sed -n 's/git@\([^:]*\):.*/\1/p')
+
+        if ! ssh -T -o StrictHostKeyChecking=no -o ConnectTimeout=10 "git@$ssh_host" 2>&1 | grep -qE "successfully authenticated|Hi"; then
+            print_error "SSH authentication failed for $ssh_host"
+            echo ""
+            echo -e "  ${YELLOW}Please ensure:${NC}"
+            echo -e "  ${YELLOW}1. Your SSH key is added to your GitHub/GitLab account${NC}"
+            echo -e "  ${YELLOW}2. Your SSH key is loaded in ssh-agent${NC}"
+            echo -e "  ${YELLOW}3. You have access to the repository${NC}"
+            echo ""
+            echo -e "  ${GRAY}Test SSH connection manually:${NC}"
+            echo -e "  ${CYAN}ssh -T git@$ssh_host${NC}"
+            echo ""
+            echo -e "  ${GRAY}Your backup is saved locally at:${NC}"
+            echo -e "  ${CYAN}$backup_dir${NC}"
+            exit 1
+        fi
+        print_status "SSH connection verified" "ok"
+    fi
+
     echo -e "  ${GRAY}Cloning repository...${NC}"
-    if ! timeout 60 git clone --depth 1 "$repo_url" "$git_dir" 2>&1 | tee -a "$LOG_FILE"; then
+    local clone_output
+    local clone_error
+    clone_error=$(mktemp)
+
+    if ! clone_output=$(timeout 60 git clone --depth 1 "$repo_url" "$git_dir" 2>"$clone_error"); then
+        # Show the actual error
+        if [[ -s "$clone_error" ]]; then
+            echo -e "  ${RED}Clone failed with error:${NC}"
+            cat "$clone_error" | sed 's/^/  /' >&2
+        fi
+
         # Repo might be empty or clone failed
         echo -e "  ${YELLOW}Clone failed, initializing new repository...${NC}"
         mkdir -p "$git_dir"
         cd "$git_dir" || {
             print_error "Failed to create git directory"
+            rm -f "$clone_error"
             exit 1
         }
         git init >/dev/null 2>&1
         git remote add origin "$repo_url"
+    else
+        print_status "Repository cloned" "ok"
     fi
+    rm -f "$clone_error"
 
     # Copy backup to repo
     echo -e "  ${GRAY}Copying backup files...${NC}"
