@@ -1,0 +1,27 @@
+# Git line endings configuration
+# Ensures scripts work correctly across Windows, Linux, and macOS
+
+# Shell scripts MUST have LF endings (Linux/macOS)
+*.sh text eol=lf
+
+# PowerShell scripts can use CRLF (Windows)
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Config files - keep LF for cross-platform compatibility
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+
+# Markdown and text files
+*.md text eol=lf
+*.txt text eol=lf
+
+# Keep these as-is (binary)
+*.tar.gz binary
+*.zip binary
+*.png binary
+*.jpg binary
+*.gif binary
