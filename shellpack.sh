@@ -168,6 +168,77 @@ print_progress() {
 }
 
 #===============================================================================
+# Input Validation & Sanitization Functions
+#===============================================================================
+
+validate_git_url() {
+    local url="$1"
+
+    if [[ -z "$url" ]]; then
+        return 1
+    fi
+
+    if [[ "$url" =~ ^(https?|git|ssh)://[a-zA-Z0-9._-]+(/[a-zA-Z0-9._/-]+)?\.git$ ]] || \
+       [[ "$url" =~ ^git@[a-zA-Z0-9._-]+:[a-zA-Z0-9._/-]+\.git$ ]] || \
+       [[ "$url" =~ ^(https?|git|ssh)://[a-zA-Z0-9._-]+(/[a-zA-Z0-9._/-]+)?$ ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+sanitize_backup_name() {
+    local name="$1"
+
+    name=$(echo "$name" | tr -cd 'a-zA-Z0-9._-')
+
+    name=$(echo "$name" | sed 's/\.\.\+/./g')
+
+    if [[ ${#name} -gt 100 ]]; then
+        name="${name:0:100}"
+    fi
+
+    if [[ -z "$name" ]]; then
+        name="backup-$(date +%Y%m%d-%H%M%S)"
+    fi
+
+    echo "$name"
+}
+
+validate_email() {
+    local email="$1"
+
+    if [[ "$email" =~ ^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+        return 0
+    fi
+
+    return 1
+}
+
+check_disk_space() {
+    local required_mb="${1:-100}"
+    local target_dir="${2:-$TEMP_DIR}"
+
+    local available_kb
+    available_kb=$(df -k "$(dirname "$target_dir")" 2>/dev/null | awk 'NR==2 {print $4}')
+
+    if [[ -z "$available_kb" ]]; then
+        log "WARN" "Could not determine available disk space"
+        return 0
+    fi
+
+    local available_mb=$((available_kb / 1024))
+
+    if (( available_mb < required_mb )); then
+        print_error "Insufficient disk space: ${available_mb}MB available, ${required_mb}MB required"
+        return 1
+    fi
+
+    log "INFO" "Disk space check passed: ${available_mb}MB available"
+    return 0
+}
+
+#===============================================================================
 # User Input Functions
 #===============================================================================
 
@@ -342,6 +413,244 @@ detect_shell() {
     shell_name=$(basename "${SHELL:-/bin/bash}")
     log "INFO" "Detected default shell: $shell_name"
     echo "$shell_name"
+}
+
+#===============================================================================
+# Dependency Check Functions
+#===============================================================================
+# SSH Key Management
+#===============================================================================
+
+backup_existing_ssh_keys() {
+    if [[ ! -d "$HOME/.ssh" ]]; then
+        return 0
+    fi
+
+    local backup_dir="$HOME/.ssh/backup_$(date +%Y%m%d_%H%M%S)"
+    local has_keys=false
+
+    for key_file in "$HOME/.ssh/id_"*; do
+        if [[ -f "$key_file" ]] && [[ ! "$key_file" =~ \.pub$ ]]; then
+            has_keys=true
+            break
+        fi
+    done
+
+    if ! $has_keys; then
+        return 0
+    fi
+
+    echo ""
+    print_status "Existing SSH keys found" "warn"
+    echo ""
+    echo -e "  ${YELLOW}Warning: Existing SSH keys detected in ~/.ssh/${NC}"
+    echo ""
+
+    if read_yes_no "Backup existing SSH keys before generating new ones?" "y"; then
+        mkdir -p "$backup_dir"
+        chmod 700 "$backup_dir"
+
+        for key_file in "$HOME/.ssh/id_"*; do
+            if [[ -f "$key_file" ]]; then
+                cp "$key_file" "$backup_dir/" 2>/dev/null
+                log "INFO" "Backed up: $key_file"
+            fi
+        done
+
+        print_status "SSH keys backed up to: $backup_dir" "ok"
+        add_rollback_action "rm -rf '$backup_dir'"
+        return 0
+    else
+        echo ""
+        if ! read_yes_no "Continue without backup? (existing keys will be overwritten)" "n"; then
+            print_status "SSH key generation cancelled" "skip"
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+generate_ssh_key_secure() {
+    local email="$1"
+    local key_type="${2:-ed25519}"
+    local key_file="$HOME/.ssh/id_${key_type}"
+    local passphrase=""
+
+    if ! validate_email "$email"; then
+        print_error "Invalid email address: $email"
+        return 1
+    fi
+
+    if ! backup_existing_ssh_keys; then
+        return 1
+    fi
+
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+
+    echo ""
+    if read_yes_no "Protect SSH key with a passphrase? (recommended)" "y"; then
+        while true; do
+            passphrase=$(read_password "Enter passphrase for SSH key")
+            local passphrase_confirm=$(read_password "Confirm passphrase")
+
+            if [[ "$passphrase" == "$passphrase_confirm" ]]; then
+                break
+            else
+                print_error "Passphrases do not match. Please try again."
+                echo ""
+            fi
+        done
+    fi
+
+    log "INFO" "Generating SSH key: $key_type"
+
+    if [[ -n "$passphrase" ]]; then
+        ssh-keygen -t "$key_type" -C "$email" -f "$key_file" -N "$passphrase" 2>/dev/null
+    else
+        ssh-keygen -t "$key_type" -C "$email" -f "$key_file" -N "" 2>/dev/null
+    fi
+
+    if [[ $? -eq 0 ]]; then
+        chmod 600 "$key_file"
+        chmod 644 "${key_file}.pub"
+
+        print_status "SSH key generated successfully" "ok"
+        echo ""
+        echo -e "  ${CYAN}Your new public key:${NC}"
+        echo -e "  ${GRAY}$(cat "${key_file}.pub")${NC}"
+        echo ""
+        echo -e "  ${YELLOW}Add this key to GitHub/GitLab/Bitbucket to enable SSH access.${NC}"
+        echo ""
+
+        log "INFO" "SSH key generated: $key_file"
+        return 0
+    else
+        print_error "Failed to generate SSH key"
+        return 1
+    fi
+}
+
+set_ssh_permissions() {
+    if [[ ! -d "$HOME/.ssh" ]]; then
+        return 0
+    fi
+
+    chmod 700 "$HOME/.ssh" 2>/dev/null
+
+    find "$HOME/.ssh" -type f -name "id_*" ! -name "*.pub" -exec chmod 600 {} \; 2>/dev/null
+
+    find "$HOME/.ssh" -type f -name "*.pub" -exec chmod 644 {} \; 2>/dev/null
+
+    if [[ -f "$HOME/.ssh/config" ]]; then
+        chmod 600 "$HOME/.ssh/config" 2>/dev/null
+    fi
+
+    if [[ -f "$HOME/.ssh/known_hosts" ]]; then
+        chmod 644 "$HOME/.ssh/known_hosts" 2>/dev/null
+    fi
+
+    if [[ -f "$HOME/.ssh/authorized_keys" ]]; then
+        chmod 600 "$HOME/.ssh/authorized_keys" 2>/dev/null
+    fi
+
+    log "INFO" "SSH permissions set correctly"
+}
+
+#===============================================================================
+# Network & Retry Logic
+#===============================================================================
+
+retry_with_backoff() {
+    local max_attempts="${1:-3}"
+    local delay="${2:-2}"
+    local max_delay="${3:-30}"
+    shift 3
+    local command=("$@")
+    local attempt=1
+    local exit_code=0
+
+    while (( attempt <= max_attempts )); do
+        log "INFO" "Attempt $attempt/$max_attempts: ${command[*]}"
+
+        if "${command[@]}"; then
+            log "INFO" "Command succeeded on attempt $attempt"
+            return 0
+        fi
+
+        exit_code=$?
+
+        if (( attempt < max_attempts )); then
+            log "WARN" "Command failed (exit code: $exit_code). Retrying in ${delay}s..."
+            sleep "$delay"
+            delay=$((delay * 2))
+            if (( delay > max_delay )); then
+                delay=$max_delay
+            fi
+        fi
+
+        ((attempt++))
+    done
+
+    log "ERROR" "Command failed after $max_attempts attempts"
+    return $exit_code
+}
+
+git_clone_with_retry() {
+    local url="$1"
+    local dest="$2"
+    local depth="${3:-1}"
+
+    if ! validate_git_url "$url"; then
+        print_error "Invalid Git repository URL: $url"
+        log "ERROR" "Git URL validation failed: $url"
+        return 1
+    fi
+
+    log "INFO" "Cloning repository: $url"
+
+    if retry_with_backoff 3 2 10 git clone --depth "$depth" "$url" "$dest" 2>&1 | tee -a "$LOG_FILE"; then
+        print_status "Repository cloned successfully" "ok"
+        return 0
+    else
+        print_error "Failed to clone repository after multiple attempts"
+        echo ""
+        echo -e "  ${YELLOW}Possible causes:${NC}"
+        echo -e "    • Network connectivity issues"
+        echo -e "    • Invalid repository URL"
+        echo -e "    • Authentication required (use SSH or configure git credentials)"
+        echo -e "    • Repository does not exist or is private"
+        echo ""
+        return 1
+    fi
+}
+
+git_push_with_retry() {
+    local remote="${1:-origin}"
+    local branch="${2:-main}"
+
+    log "INFO" "Pushing to $remote/$branch"
+
+    if retry_with_backoff 3 2 10 git push "$remote" "$branch" 2>&1 | tee -a "$LOG_FILE"; then
+        print_status "Changes pushed successfully" "ok"
+        return 0
+    else
+        print_error "Failed to push changes after multiple attempts"
+        echo ""
+        echo -e "  ${YELLOW}Possible causes:${NC}"
+        echo -e "    • Network connectivity issues"
+        echo -e "    • Authentication required"
+        echo -e "    • No write access to repository"
+        echo -e "    • Branch protection rules"
+        echo ""
+        echo -e "  ${CYAN}Try:${NC}"
+        echo -e "    • Check your git credentials: git config --list"
+        echo -e "    • Use SSH instead of HTTPS"
+        echo -e "    • Verify repository permissions"
+        echo ""
+        return 1
+    fi
 }
 
 #===============================================================================
@@ -966,20 +1275,81 @@ restore_starship() {
 
 restore_git_config() {
     local src_dir="$1"
-    
+
     if [[ ! -f "$src_dir/config/.gitconfig" ]]; then
         print_status "Git config not in backup" "skip"
         return 0
     fi
-    
+
     if $DRY_RUN; then
         print_status "[DRY RUN] Would restore Git config" "info"
         return 0
     fi
-    
+
     cp "$src_dir/config/.gitconfig" "$HOME/"
-    
+
     print_status "Git config" "ok"
+}
+
+setup_git_credential_helper() {
+    print_section "Git Credential Helper"
+    echo ""
+    echo -e "  Git credential helpers securely store your credentials."
+    echo ""
+
+    local os
+    os=$(detect_os)
+
+    local helper=""
+    case "$os" in
+        macos)
+            helper="osxkeychain"
+            if git credential-osxkeychain 2>&1 | grep -q "usage:"; then
+                echo -e "  ${GREEN}✓${NC} macOS Keychain available"
+            else
+                print_status "macOS Keychain not available" "warn"
+                return 0
+            fi
+            ;;
+        linux)
+            if command -v gnome-keyring-daemon &>/dev/null; then
+                helper="libsecret"
+                echo -e "  ${GREEN}✓${NC} GNOME Keyring available"
+            elif command -v pass &>/dev/null; then
+                helper="pass"
+                echo -e "  ${GREEN}✓${NC} pass (password store) available"
+            else
+                helper="cache --timeout=3600"
+                echo -e "  ${YELLOW}!${NC} Using cache helper (1 hour timeout)"
+                echo -e "  ${GRAY}Install gnome-keyring or pass for persistent storage${NC}"
+            fi
+            ;;
+        wsl)
+            if [[ -f "/mnt/c/Program Files/Git/mingw64/bin/git-credential-manager.exe" ]]; then
+                helper="manager"
+                echo -e "  ${GREEN}✓${NC} Git Credential Manager (Windows) available"
+            else
+                helper="cache --timeout=3600"
+                echo -e "  ${YELLOW}!${NC} Using cache helper (1 hour timeout)"
+            fi
+            ;;
+        *)
+            helper="cache --timeout=3600"
+            echo -e "  ${YELLOW}!${NC} Using cache helper (1 hour timeout)"
+            ;;
+    esac
+
+    echo ""
+    if read_yes_no "Configure Git credential helper ($helper)?" "y"; then
+        if ! $DRY_RUN; then
+            git config --global credential.helper "$helper"
+            print_status "Git credential helper configured" "ok"
+        else
+            print_status "[DRY RUN] Would configure credential helper" "info"
+        fi
+    else
+        print_status "Git credential helper skipped" "skip"
+    fi
 }
 
 restore_ssh() {
@@ -1383,7 +1753,80 @@ do_backup() {
     
     # Remove trailing comma
     shell_json="${shell_json%,}"
-    
+
+    # Estimate backup size
+    print_section "Estimating Backup Size"
+    echo ""
+
+    local total_size=0
+
+    for shell in "${shells_to_backup[@]}"; do
+        case "$shell" in
+            fish)
+                if [[ -d "$HOME/.config/fish" ]]; then
+                    local size=$(du -sk "$HOME/.config/fish" 2>/dev/null | cut -f1)
+                    total_size=$((total_size + size))
+                fi
+                ;;
+            bash)
+                for file in .bashrc .bash_aliases .bash_profile .profile .bash_logout; do
+                    if [[ -f "$HOME/$file" ]]; then
+                        local size=$(du -sk "$HOME/$file" 2>/dev/null | cut -f1)
+                        total_size=$((total_size + size))
+                    fi
+                done
+                ;;
+            zsh)
+                for file in .zshrc .zprofile .zshenv .zlogin .zlogout; do
+                    if [[ -f "$HOME/$file" ]]; then
+                        local size=$(du -sk "$HOME/$file" 2>/dev/null | cut -f1)
+                        total_size=$((total_size + size))
+                    fi
+                done
+                if [[ -d "$HOME/.oh-my-zsh" ]]; then
+                    local size=$(du -sk "$HOME/.oh-my-zsh" 2>/dev/null | cut -f1)
+                    total_size=$((total_size + size))
+                fi
+                ;;
+        esac
+    done
+
+    if [[ -f "$HOME/.config/starship.toml" ]]; then
+        local size=$(du -sk "$HOME/.config/starship.toml" 2>/dev/null | cut -f1)
+        total_size=$((total_size + size))
+    fi
+
+    if $include_git_config && [[ -f "$HOME/.gitconfig" ]]; then
+        local size=$(du -sk "$HOME/.gitconfig" 2>/dev/null | cut -f1)
+        total_size=$((total_size + size))
+    fi
+
+    if $include_ssh && [[ -d "$HOME/.ssh" ]]; then
+        local size=$(du -sk "$HOME/.ssh" 2>/dev/null | cut -f1)
+        total_size=$((total_size + size))
+    fi
+
+    if $include_conda && [[ -d "$HOME/.conda" ]]; then
+        local size=$(du -sk "$HOME/.conda/environments.txt" 2>/dev/null | cut -f1)
+        total_size=$((total_size + size))
+    fi
+
+    if $include_history; then
+        for file in .bash_history .zsh_history .local/share/fish/fish_history; do
+            if [[ -f "$HOME/$file" ]]; then
+                local size=$(du -sk "$HOME/$file" 2>/dev/null | cut -f1)
+                total_size=$((total_size + size))
+            fi
+        done
+    fi
+
+    local size_mb=$((total_size / 1024))
+    if [[ $size_mb -lt 1 ]]; then
+        echo -e "  Estimated size: ${CYAN}${total_size}KB${NC}"
+    else
+        echo -e "  Estimated size: ${CYAN}${size_mb}MB${NC}"
+    fi
+
     # Create temp directory
     mkdir -p "$TEMP_DIR"
     
@@ -1611,14 +2054,7 @@ do_restore() {
                 local email
                 email=$(read_input "Enter email for SSH key")
                 if [[ -n "$email" ]]; then
-                    mkdir -p "$HOME/.ssh"
-                    ssh-keygen -t ed25519 -C "$email" -f "$HOME/.ssh/id_ed25519" -N "" 2>/dev/null
-                    print_status "SSH key generated" "ok"
-                    echo ""
-                    echo -e "  ${CYAN}Your new public key:${NC}"
-                    echo -e "  ${GRAY}$(cat "$HOME/.ssh/id_ed25519.pub")${NC}"
-                    echo ""
-                    echo -e "  ${YELLOW}Add this key to GitHub/GitLab to enable SSH access.${NC}"
+                    generate_ssh_key_secure "$email"
                 fi
                 ;;
             3)
@@ -1632,11 +2068,7 @@ do_restore() {
             email=$(read_input "Enter email for SSH key")
             if [[ -n "$email" ]]; then
                 mkdir -p "$HOME/.ssh"
-                ssh-keygen -t ed25519 -C "$email" -f "$HOME/.ssh/id_ed25519" -N "" 2>/dev/null
-                print_status "SSH key generated" "ok"
-                echo ""
-                echo -e "  ${CYAN}Your new public key:${NC}"
-                echo -e "  ${GRAY}$(cat "$HOME/.ssh/id_ed25519.pub")${NC}"
+                generate_ssh_key_secure "$email"
             fi
         fi
     fi
@@ -1690,10 +2122,11 @@ do_restore() {
     
     restore_starship "$backup_dir"
     restore_git_config "$backup_dir"
+    setup_git_credential_helper
     restore_conda "$backup_dir" "$os" "$arch"
     restore_history "$backup_dir"
     restore_cloud_creds "$backup_dir"
-    
+
     # Set default shell
     print_section "Setting Default Shell"
     echo ""
@@ -1769,16 +2202,83 @@ show_version() {
 }
 
 #===============================================================================
-# Cleanup
+# Cleanup & Rollback
 #===============================================================================
 
+BACKUP_IN_PROGRESS=false
+RESTORE_IN_PROGRESS=false
+ROLLBACK_STACK=()
+
+add_rollback_action() {
+    local action="$1"
+    ROLLBACK_STACK+=("$action")
+    log "DEBUG" "Added rollback action: $action"
+}
+
+execute_rollback() {
+    if [[ ${#ROLLBACK_STACK[@]} -eq 0 ]]; then
+        return 0
+    fi
+
+    print_section "Rolling Back Changes"
+    echo ""
+
+    for ((i=${#ROLLBACK_STACK[@]}-1; i>=0; i--)); do
+        local action="${ROLLBACK_STACK[$i]}"
+        log "INFO" "Executing rollback: $action"
+        eval "$action" 2>/dev/null || true
+    done
+
+    ROLLBACK_STACK=()
+    print_status "Rollback completed" "ok"
+}
+
 cleanup() {
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        if $BACKUP_IN_PROGRESS || $RESTORE_IN_PROGRESS; then
+            echo ""
+            print_error "Operation interrupted or failed (exit code: $exit_code)"
+
+            if [[ ${#ROLLBACK_STACK[@]} -gt 0 ]]; then
+                echo ""
+                if read_yes_no "Attempt to rollback changes?" "y"; then
+                    execute_rollback
+                fi
+            fi
+        fi
+    fi
+
     if [[ -d "$TEMP_DIR" ]]; then
-        rm -rf "$TEMP_DIR"
+        log "INFO" "Cleaning up temporary directory: $TEMP_DIR"
+        rm -rf "$TEMP_DIR" 2>/dev/null || true
+    fi
+
+    if [[ -f "$LOG_FILE" ]] && ! $VERBOSE; then
+        local log_size=$(du -k "$LOG_FILE" 2>/dev/null | cut -f1)
+        if [[ -n "$log_size" ]] && (( log_size > 1024 )); then
+            echo ""
+            echo -e "  ${GRAY}Large log file created: $LOG_FILE (${log_size}KB)${NC}"
+        fi
     fi
 }
 
+handle_interrupt() {
+    echo ""
+    print_error "Operation interrupted by user (SIGINT)"
+    exit 130
+}
+
+handle_termination() {
+    echo ""
+    print_error "Operation terminated (SIGTERM)"
+    exit 143
+}
+
 trap cleanup EXIT
+trap handle_interrupt INT
+trap handle_termination TERM HUP
 
 #===============================================================================
 # Main Entry Point

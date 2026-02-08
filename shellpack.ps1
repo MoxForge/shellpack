@@ -40,7 +40,10 @@ param(
     [Parameter(Position=0)]
     [ValidateSet('backup', 'restore', 'help', 'version', '')]
     [string]$Action = '',
-    
+
+    [Parameter()]
+    [string]$UbuntuVersion = "24.04",
+
     [switch]$DryRun
 )
 
@@ -52,6 +55,7 @@ $Script:VERSION = "1.0.0"
 $Script:SCRIPT_NAME = "shellpack"
 $Script:GITHUB_REPO = "https://github.com/MoxForge/shellpack"
 $Script:GITHUB_RAW = "https://raw.githubusercontent.com/MoxForge/shellpack/main"
+$Script:UBUNTU_VERSION = $UbuntuVersion
 
 #===============================================================================
 # Output Functions
@@ -177,13 +181,26 @@ function Read-Choice {
     return $choice
 }
 
-function Read-Password {
+function Read-SecurePassword {
     param([string]$Prompt)
-    
+
     Write-Host -NoNewline "    ${Prompt}: " -ForegroundColor Cyan
     $secure = Read-Host -AsSecureString
-    $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
-    return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+    return $secure
+}
+
+function ConvertFrom-SecureStringToPlainText {
+    param([System.Security.SecureString]$SecureString)
+
+    try {
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
+        $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        return $plainText
+    } finally {
+        if ($BSTR -ne [IntPtr]::Zero) {
+            [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+        }
+    }
 }
 
 #===============================================================================
@@ -394,37 +411,92 @@ function Start-RestoreNewWSL {
     # Create WSL instance
     Write-Section "Creating WSL Instance"
     Write-Host ""
-    Write-Host "    Installing Ubuntu 24.04 as '$wslName'..." -ForegroundColor White
+    Write-Host "    Installing Ubuntu $Script:UBUNTU_VERSION as '$wslName'..." -ForegroundColor White
     Write-Host "    This may take a few minutes..." -ForegroundColor Gray
     Write-Host ""
-    
+
     if (-not $DryRun) {
-        wsl --install Ubuntu-24.04 --name $wslName 2>&1 | Out-Null
-        Start-Sleep -Seconds 3
+        try {
+            $ubuntuDistro = "Ubuntu-$Script:UBUNTU_VERSION"
+            $result = wsl --install $ubuntuDistro --name $wslName 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Status "Failed to install WSL: $result" "error"
+                Write-Host ""
+                Write-Host "    Available distributions:" -ForegroundColor Yellow
+                wsl --list --online
+                return
+            }
+            Start-Sleep -Seconds 3
+        } catch {
+            Write-Status "Error creating WSL instance: $_" "error"
+            return
+        }
     }
-    
+
     # User setup
     Write-Section "User Setup"
     Write-Host ""
-    
+
     $username = Read-Input "Enter username"
-    
-    $password = ""
-    $confirmPassword = ""
+
+    $securePassword = $null
+    $secureConfirmPassword = $null
     do {
-        $password = Read-Password "Enter password"
-        $confirmPassword = Read-Password "Confirm password"
-        
+        $securePassword = Read-SecurePassword "Enter password"
+        $secureConfirmPassword = Read-SecurePassword "Confirm password"
+
+        $password = ConvertFrom-SecureStringToPlainText $securePassword
+        $confirmPassword = ConvertFrom-SecureStringToPlainText $secureConfirmPassword
+
         if ($password -ne $confirmPassword) {
             Write-Host "        Passwords don't match! Try again." -ForegroundColor Yellow
         }
     } while ($password -ne $confirmPassword)
-    
+
     # Create user
     Write-Host ""
     Write-Host "    Creating user..." -ForegroundColor Gray
-    
+
     if (-not $DryRun) {
+        try {
+            $result = wsl -d $wslName -- bash -c "useradd -m -s /bin/bash -G sudo '$username' 2>&1"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Status "Failed to create user: $result" "error"
+                return
+            }
+
+            $result = wsl -d $wslName -- bash -c "echo '${username}:${password}' | chpasswd 2>&1"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Status "Failed to set password: $result" "error"
+                return
+            }
+
+            $result = wsl -d $wslName -- bash -c "echo '[user]' > /etc/wsl.conf; echo 'default=$username' >> /etc/wsl.conf 2>&1"
+            if ($LASTEXITCODE -ne 0) {
+                Write-Status "Failed to configure default user: $result" "error"
+                return
+            }
+
+            # Restart WSL to apply user
+            $result = wsl --terminate $wslName 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Status "Failed to restart WSL instance" "warn"
+            }
+            Start-Sleep -Seconds 3
+        } finally {
+            if ($password) {
+                $password = $null
+            }
+            if ($confirmPassword) {
+                $confirmPassword = $null
+            }
+            if ($securePassword) {
+                $securePassword.Dispose()
+            }
+            if ($secureConfirmPassword) {
+                $secureConfirmPassword.Dispose()
+            }
+        }
         wsl -d $wslName -- bash -c "useradd -m -s /bin/bash -G sudo $username 2>/dev/null; echo '${username}:${password}' | chpasswd" 2>&1 | Out-Null
         wsl -d $wslName -- bash -c "echo '[user]' > /etc/wsl.conf; echo 'default=$username' >> /etc/wsl.conf" 2>&1 | Out-Null
         

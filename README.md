@@ -24,6 +24,11 @@
 
 ---
 
+> **🎉 Version 1.0.0 - Production Ready!**
+> ShellPack has been enhanced with comprehensive security features, automatic rollback, retry logic, and improved error handling. See [IMPROVEMENTS.md](IMPROVEMENTS.md) for details.
+
+---
+
 ## ⚡ Quick Start
 
 **No installation required!** Run directly from GitHub:
@@ -57,6 +62,11 @@ iex (irm https://raw.githubusercontent.com/MoxForge/shellpack/main/shellpack.ps1
 | 🆕 **Safe Restore** | Creates NEW WSL instances, never touches existing ones |
 | ✅ **Integrity Check** | SHA-256 checksums verify backup integrity |
 | 🎨 **Beautiful CLI** | Colored output, progress indicators, clear prompts |
+| 🔐 **Security First** | Input validation, SSH key backup, secure password handling |
+| 🔄 **Auto-Retry** | Network operations retry with exponential backoff |
+| ↩️ **Rollback Support** | Automatic rollback on failed operations |
+| 💾 **Smart Checks** | Disk space verification and backup size estimation |
+| 🔑 **Git Credentials** | Automatic credential helper setup for seamless Git operations |
 
 ---
 
@@ -97,6 +107,23 @@ shellpack --help              # Show help
 shellpack --version           # Show version
 shellpack --verbose backup    # Verbose output
 shellpack --dry-run restore   # Preview without changes
+```
+
+### PowerShell Options
+
+```powershell
+# Interactive menu
+iex (irm https://raw.githubusercontent.com/MoxForge/shellpack/main/shellpack.ps1)
+
+# Direct commands
+.\shellpack.ps1 backup
+.\shellpack.ps1 restore
+
+# Custom Ubuntu version for new WSL instances
+.\shellpack.ps1 restore -UbuntuVersion "22.04"
+
+# Dry run mode
+.\shellpack.ps1 backup -DryRun
 ```
 
 ---
@@ -258,6 +285,45 @@ ShellPack automatically installs any shells that were in your backup. It detects
 <details>
 <summary><strong>Can I have multiple backups?</strong></summary>
 
+ShellPack automatically installs any shells that were in your backup. It detects your package manager (apt, brew, dnf, pacman) and installs appropriately.
+</details>
+
+---
+
+## 🔒 Security Features
+
+ShellPack is built with security as a priority:
+
+### Input Validation
+- **Git URL Validation**: All repository URLs are validated to prevent injection attacks
+- **Backup Name Sanitization**: Backup names are sanitized to prevent path traversal attacks
+- **Email Validation**: Email addresses are validated for SSH key generation
+
+### SSH Key Security
+- **Automatic Backup**: Existing SSH keys are backed up before generating new ones
+- **Passphrase Protection**: Optional passphrase support for SSH keys
+- **Proper Permissions**: Automatic permission setting (700 for .ssh, 600 for private keys, 644 for public keys)
+
+### Secure Password Handling (PowerShell)
+- **SecureString**: Passwords are handled as SecureString objects
+- **Memory Cleanup**: Passwords are cleared from memory after use
+- **No Plain Text Storage**: Passwords are never stored in plain text
+
+### Network Security
+- **Retry Logic**: Network operations retry with exponential backoff
+- **Error Handling**: Comprehensive error checking for all operations
+- **Rollback Support**: Failed operations can be automatically rolled back
+
+### Git Credential Management
+- **Platform-Specific Helpers**: Automatic detection and setup of credential helpers
+  - macOS: osxkeychain
+  - Linux: libsecret, pass, or cache
+  - WSL: Git Credential Manager (Windows) or cache
+
+---
+
+## 🤝 Contributing
+
 **Yes!** Each backup has a unique name (default: `shell-hostname-date`). You can keep as many as you want in your repository.
 </details>
 
@@ -265,6 +331,20 @@ ShellPack automatically installs any shells that were in your backup. It detects
 <summary><strong>How do I update ShellPack?</strong></summary>
 
 No update needed! The one-liner always fetches the latest version from GitHub.
+</details>
+
+<details>
+<summary><strong>What security measures are in place?</strong></summary>
+
+ShellPack includes comprehensive security features:
+- Input validation for all user inputs (URLs, backup names, emails)
+- Automatic SSH key backup before generating new keys
+- Secure password handling with memory cleanup (PowerShell)
+- Proper file permissions for SSH keys
+- Git credential helper support for secure authentication
+- Rollback mechanism for failed operations
+
+See the [Security Features](#-security-features) section for details.
 </details>
 
 ---
