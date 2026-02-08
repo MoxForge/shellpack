@@ -349,6 +349,38 @@ ShellPack includes comprehensive security features:
 See the [Security Features](#-security-features) section for details.
 </details>
 
+<details>
+<summary><strong>Backup process stops or hangs - what should I do?</strong></summary>
+
+If your backup stops after "SSH keys" or appears to hang:
+
+1. **Check Conda**: If you have Conda installed, it might be taking time to export environments. The script now has a 30-second timeout per environment.
+
+2. **Check Git Authentication**: Ensure your SSH key is added to GitHub/GitLab:
+   ```bash
+   ssh -T git@github.com
+   ```
+
+3. **Check the Log File**: View detailed logs at `~/.shellpack/shellpack.log`
+
+4. **Try with Verbose Mode**:
+   ```bash
+   shellpack --verbose backup
+   ```
+
+5. **Manual Push**: If backup completes but push fails, you can manually push:
+   ```bash
+   cd ~/.shellpack/temp/git
+   git push -u origin main
+   ```
+
+Common issues:
+- **Conda timeout**: Large Conda environments may timeout - this is normal, the script will continue
+- **SSH authentication**: Make sure your SSH key is added to your Git provider
+- **Network issues**: Check your internet connection
+- **Repository access**: Verify you have write access to the repository
+</details>
+
 ---
 
 ## 🤝 Contributing

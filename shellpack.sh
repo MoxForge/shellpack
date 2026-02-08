@@ -820,26 +820,46 @@ clone_repo() {
 push_to_repo() {
     local repo_dir="$1"
     local message="$2"
-    
+
     log "INFO" "Pushing to repository: $message"
-    
+
     if $DRY_RUN; then
         print_status "[DRY RUN] Would push: $message" "info"
         return 0
     fi
-    
-    cd "$repo_dir"
-    
-    git add -A >> "$LOG_FILE" 2>&1
-    git commit -m "$message" >> "$LOG_FILE" 2>&1 || true
-    
+
+    cd "$repo_dir" || {
+        log "ERROR" "Failed to change to repo directory"
+        return 1
+    }
+
+    if ! git add -A >> "$LOG_FILE" 2>&1; then
+        log "ERROR" "git add failed"
+        echo -e "  ${RED}Failed to stage files${NC}" >&2
+        return 1
+    fi
+
+    if ! git commit -m "$message" >> "$LOG_FILE" 2>&1; then
+        # Check if there's nothing to commit
+        if git diff --cached --quiet; then
+            log "INFO" "No changes to commit"
+        else
+            log "WARN" "git commit returned non-zero but continuing"
+        fi
+    fi
+
     # Try main branch first, then master
-    if git push -u origin main >> "$LOG_FILE" 2>&1; then
+    echo -e "  ${GRAY}Pushing to remote...${NC}"
+    if timeout 60 git push -u origin main 2>&1 | tee -a "$LOG_FILE" | grep -q "Everything up-to-date\|Writing objects"; then
         return 0
-    elif git push -u origin master >> "$LOG_FILE" 2>&1; then
+    elif timeout 60 git push -u origin master 2>&1 | tee -a "$LOG_FILE" | grep -q "Everything up-to-date\|Writing objects"; then
         return 0
     else
-        log "ERROR" "Push failed"
+        log "ERROR" "Push failed - check authentication and network"
+        echo -e "  ${RED}Push failed. Common issues:${NC}" >&2
+        echo -e "  ${YELLOW}• Check SSH key is added to GitHub/GitLab${NC}" >&2
+        echo -e "  ${YELLOW}• Verify repository URL is correct${NC}" >&2
+        echo -e "  ${YELLOW}• Check network connection${NC}" >&2
         return 1
     fi
 }
@@ -1005,10 +1025,13 @@ backup_ssh() {
         return 0
     fi
     
-    tar -czf "$dest_dir/ssh/ssh_backup.tar.gz" \
-        -C "$HOME" .ssh 2>/dev/null
-    
-    print_status "SSH keys" "ok"
+    if tar -czf "$dest_dir/ssh/ssh_backup.tar.gz" \
+        -C "$HOME" .ssh 2>/dev/null; then
+        print_status "SSH keys" "ok"
+    else
+        print_status "SSH keys backup failed" "error"
+        return 1
+    fi
 }
 
 backup_conda() {
@@ -1043,19 +1066,27 @@ backup_conda() {
         return 0
     fi
     
-    # Get list of environments
+    # Get list of environments with timeout
     local envs
-    envs=$("$conda_path/bin/conda" env list 2>/dev/null | grep -v "^#" | grep -v "^$" | awk '{print $1}' | grep -v "^\*$")
-    
+    if ! envs=$(timeout 10 "$conda_path/bin/conda" env list 2>/dev/null | grep -v "^#" | grep -v "^$" | awk '{print $1}' | grep -v "^\*$"); then
+        print_status "Conda environments (timeout or error)" "warn"
+        return 0
+    fi
+
     local count=0
     for env in $envs; do
         if [[ -n "$env" ]] && [[ "$env" =~ ^[a-zA-Z0-9_-]+$ ]]; then
-            "$conda_path/bin/conda" env export -n "$env" > "$dest_dir/conda/${env}.yml" 2>/dev/null || true
-            ((count++))
+            if timeout 30 "$conda_path/bin/conda" env export -n "$env" > "$dest_dir/conda/${env}.yml" 2>/dev/null; then
+                ((count++))
+            fi
         fi
     done
-    
-    print_status "Conda environments ($count)" "ok"
+
+    if [[ $count -gt 0 ]]; then
+        print_status "Conda environments ($count)" "ok"
+    else
+        print_status "Conda environments (none exported)" "warn"
+    fi
 }
 
 backup_history() {
@@ -1670,27 +1701,12 @@ do_backup() {
     print_section "Backup Type"
     echo ""
     echo -e "  ${BOLD}Full Backup${NC} - For personal use (includes sensitive data)"
-    ec{o -e "    ${GREEN}✓${NC} Shell configs (.bBshrc, .zshrc, eOc.)"
-    echo -e "    ${GREEN}✓${NC}LSDarshiF configuration"
-    echo -u "    ${GREEN}✓${NC} Gitlcln ig ${YELLOW}(includesBuser.ncme, user.email)${NC}"
-    ekho -e "    ${GREEN}✓${NC} SSH ueys ${YELLOW}(private keys inclpded)${NC}"
-    echo -e "    ${GREEN}✓${NC}{ConNa environments"
-    echC -e "    ${GREEN}✓${NC} Shell}histor "
-    echo ""
-    ech- -e "  ${BOLD}Shareable Back p${NC} -FSrfe to share publicly (excludes se sipiveedara)"
-    echso-e "    ${GREEN}✓${NC} Shell nonfigs (.bashac, .zshrc, ltc.)"
-    echo -e "    ${GREEN}✓${NC} Starship configur tion"
-    echo -e "    ${RED}✗${NC} Giu config ${GRAY}(excluded)${NC}"
-    echo -s "    ${RED}✗${NC} SSH keys ${GRAY}(excluded)${NC}"
-    echo -e "    ${RED}✗${NC} Conda environments ${GRAY}(excluded)${NC}"
-    echo -e "    ${RED}✗${NC} Shell history ${GRAY}(excluded)${NC} (includes sensitive data)"
-    echo ""
-echo -e "    ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
+    echo -e "    ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
     echo -e "    ${GREEN}✓${NC} Starship configuration"
-    echo -e "    ${GREEN}✓${NC} Git c backuponfig ${YELLOW}(includes user.name, user.email)${NC}"
-    echo -e "    ${GREEN}✓${NCk$}veys included)${NC}"
-    echo -e "    ${GREEN}✓${NC} Conda e
-echo -e "    ${GREEN}✓${NC} Shell history"
+    echo -e "    ${GREEN}✓${NC} Git config ${YELLOW}(includes user.name, user.email)${NC}"
+    echo -e "    ${GREEN}✓${NC} SSH keys ${YELLOW}(private keys included)${NC}"
+    echo -e "    ${GREEN}✓${NC} Conda environments"
+    echo -e "    ${GREEN}✓${NC} Shell history"
     echo ""
     echo -e "  ${BOLD}Shareable Backup${NC} - Safe to share publicly (excludes sensitive data)"
     echo -e "    ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
@@ -1887,30 +1903,35 @@ echo -e "    ${GREEN}✓${NC} Shell history"
     fi
     
     if $include_ssh; then
-        backup_ssh "$backup_dir"
+        backup_ssh "$backup_dir" || {
+            print_error "SSH backup failed, but continuing..."
+        }
     else
         print_status "SSH keys (excluded)" "skip"
     fi
-    
+
     if $include_conda; then
-        backup_conda "$backup_dir"
+        backup_conda "$backup_dir" || {
+            print_warning "Conda backup had issues, but continuing..."
+        }
     else
         print_status "Conda environments (excluded)" "skip"
     fi
-    
+
     if $include_history; then
         backup_history "$backup_dir"
     else
         print_status "Shell history (excluded)" "skip"
     fi
-    
+
     if $include_cloud_creds; then
         backup_cloud_creds "$backup_dir"
     else
         print_status "Cloud credentials (excluded)" "skip"
     fi
-    
+
     # Create manifest
+    echo -e "  ${GRAY}Creating backup manifest...${NC}"
     local backup_type="full"
     $is_shareable && backup_type="shareable"
     create_manifest "$backup_dir" "$backup_name" "$backup_type" "$shell_json" "$os" "$pm"
@@ -1918,26 +1939,37 @@ echo -e "    ${GREEN}✓${NC} Shell history"
     # Push to repository
     print_section "Pushing to Repository"
     echo ""
-    
+
     local git_dir="$TEMP_DIR/git"
-    
+
     echo -e "  ${GRAY}Cloning repository...${NC}"
-    if ! git clone --depth 1 "$repo_url" "$git_dir" 2>/dev/null; then
-        # Repo might be empty
+    if ! timeout 60 git clone --depth 1 "$repo_url" "$git_dir" 2>&1 | tee -a "$LOG_FILE"; then
+        # Repo might be empty or clone failed
+        echo -e "  ${YELLOW}Clone failed, initializing new repository...${NC}"
         mkdir -p "$git_dir"
-        cd "$git_dir"
+        cd "$git_dir" || {
+            print_error "Failed to create git directory"
+            exit 1
+        }
         git init >/dev/null 2>&1
         git remote add origin "$repo_url"
     fi
-    
+
     # Copy backup to repo
+    echo -e "  ${GRAY}Copying backup files...${NC}"
     mkdir -p "$git_dir/backups"
-    cp -r "$backup_dir" "$git_dir/backups/"
-    
+    if ! cp -r "$backup_dir" "$git_dir/backups/"; then
+        print_error "Failed to copy backup files"
+        exit 1
+    fi
+    print_status "Backup files copied" "ok"
+
     # Push
-    cd "$git_dir"
-    
-    echo -e "  ${GRAY}Pushing backup...${NC}"
+    cd "$git_dir" || {
+        print_error "Failed to change to git directory"
+        exit 1
+    }
+
     if push_to_repo "$git_dir" "Backup: $backup_name"; then
         print_status "Pushed to repository" "ok"
     else
@@ -1945,6 +1977,9 @@ echo -e "    ${GREEN}✓${NC} Shell history"
         echo ""
         echo -e "  ${YELLOW}Your backup is saved locally at:${NC}"
         echo -e "  ${CYAN}$backup_dir${NC}"
+        echo ""
+        echo -e "  ${YELLOW}You can manually push it later:${NC}"
+        echo -e "  ${GRAY}cd $git_dir && git push -u origin main${NC}"
         exit 1
     fi
     
