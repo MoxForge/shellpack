@@ -81,7 +81,9 @@ shellpack backup
 The script will:
 1. Ask for your backup Git repository URL
 2. Let you name your backup (default: `{shell}-{hostname}-{date}`)
-3. Choose backup type (Full or Shareable)
+3. Choose backup type:
+   - **Full backup**: Personal use (includes SSH keys, Git config, history, Conda)
+   - **Shareable backup**: Safe to share publicly (excludes sensitive data)
 4. Select which data to include
 5. Push everything to your repository
 

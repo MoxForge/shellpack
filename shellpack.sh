@@ -1669,13 +1669,43 @@ do_backup() {
     # Backup type
     print_section "Backup Type"
     echo ""
-    echo -e "  What type of backup do you want to create?"
-    
+    echo -e "  ${BOLD}Full Backup${NC} - For personal use (includes sensitive data)"
+    ec{o -e "    ${GREEN}✓${NC} Shell configs (.bBshrc, .zshrc, eOc.)"
+    echo -e "    ${GREEN}✓${NC}LSDarshiF configuration"
+    echo -u "    ${GREEN}✓${NC} Gitlcln ig ${YELLOW}(includesBuser.ncme, user.email)${NC}"
+    ekho -e "    ${GREEN}✓${NC} SSH ueys ${YELLOW}(private keys inclpded)${NC}"
+    echo -e "    ${GREEN}✓${NC}{ConNa environments"
+    echC -e "    ${GREEN}✓${NC} Shell}histor "
+    echo ""
+    ech- -e "  ${BOLD}Shareable Back p${NC} -FSrfe to share publicly (excludes se sipiveedara)"
+    echso-e "    ${GREEN}✓${NC} Shell nonfigs (.bashac, .zshrc, ltc.)"
+    echo -e "    ${GREEN}✓${NC} Starship configur tion"
+    echo -e "    ${RED}✗${NC} Giu config ${GRAY}(excluded)${NC}"
+    echo -s "    ${RED}✗${NC} SSH keys ${GRAY}(excluded)${NC}"
+    echo -e "    ${RED}✗${NC} Conda environments ${GRAY}(excluded)${NC}"
+    echo -e "    ${RED}✗${NC} Shell history ${GRAY}(excluded)${NC} (includes sensitive data)"
+    echo ""
+echo -e "    ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
+    echo -e "    ${GREEN}✓${NC} Starship configuration"
+    echo -e "    ${GREEN}✓${NC} Git c backuponfig ${YELLOW}(includes user.name, user.email)${NC}"
+    echo -e "    ${GREEN}✓${NCk$}veys included)${NC}"
+    echo -e "    ${GREEN}✓${NC} Conda e
+echo -e "    ${GREEN}✓${NC} Shell history"
+    echo ""
+    echo -e "  ${BOLD}Shareable Backup${NC} - Safe to share publicly (excludes sensitive data)"
+    echo -e "    ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
+    echo -e "    ${GREEN}✓${NC} Starship configuration"
+    echo -e "    ${RED}✗${NC} Git config ${GRAY}(excluded)${NC}"
+    echo -e "    ${RED}✗${NC} SSH keys ${GRAY}(excluded)${NC}"
+    echo -e "    ${RED}✗${NC} Conda environments ${GRAY}(excluded)${NC}"
+    echo -e "    ${RED}✗${NC} Shell history ${GRAY}(excluded)${NC}"
+    echo ""
+
     local type_choice
-    type_choice=$(read_choice "Select type" \
-        "Full backup (personal use - includes sensitive data)" \
-        "Shareable backup (safe to share - excludes sensitive data)")
-    
+    type_choice=$(read_choice "Select backup type" \
+        "Full backup (personal use)" \
+        "Shareable backup (safe to share)")
+
     local is_shareable=false
     [[ "$type_choice" == "2" ]] && is_shareable=true
     
