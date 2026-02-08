@@ -1164,15 +1164,15 @@ create_manifest() {
     local shells="$4"
     local os="$5"
     local pm="$6"
-    
+
     local default_shell
     default_shell=$(detect_shell)
-    
+
     if $DRY_RUN; then
         print_status "[DRY RUN] Would create manifest" "info"
         return 0
     fi
-    
+
     cat > "$dest_dir/$MANIFEST_FILE" << EOF
 {
     "version": "$VERSION",
@@ -1191,26 +1191,35 @@ create_manifest() {
     "checksum": ""
 }
 EOF
-    
-    # Calculate checksum
+
+    # Calculate checksum with timeout
+    echo -e "  ${GRAY}Calculating checksum...${NC}"
     local checksum
     if command -v sha256sum &>/dev/null; then
-        checksum=$(find "$dest_dir" -type f ! -name "$MANIFEST_FILE" -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1)
+        if checksum=$(timeout 30 bash -c "find '$dest_dir' -type f ! -name '$MANIFEST_FILE' -exec sha256sum {} \; | sort | sha256sum | cut -d' ' -f1" 2>/dev/null); then
+            : # Success
+        else
+            checksum="timeout"
+        fi
     elif command -v shasum &>/dev/null; then
-        checksum=$(find "$dest_dir" -type f ! -name "$MANIFEST_FILE" -exec shasum -a 256 {} \; | sort | shasum -a 256 | cut -d' ' -f1)
+        if checksum=$(timeout 30 bash -c "find '$dest_dir' -type f ! -name '$MANIFEST_FILE' -exec shasum -a 256 {} \; | sort | shasum -a 256 | cut -d' ' -f1" 2>/dev/null); then
+            : # Success
+        else
+            checksum="timeout"
+        fi
     else
         checksum="unavailable"
     fi
-    
+
     # Update manifest with checksum
     if command -v jq &>/dev/null; then
-        jq --arg cs "$checksum" '.checksum = $cs' "$dest_dir/$MANIFEST_FILE" > "$dest_dir/${MANIFEST_FILE}.tmp"
-        mv "$dest_dir/${MANIFEST_FILE}.tmp" "$dest_dir/$MANIFEST_FILE"
+        jq --arg cs "$checksum" '.checksum = $cs' "$dest_dir/$MANIFEST_FILE" > "$dest_dir/${MANIFEST_FILE}.tmp" 2>/dev/null || true
+        mv "$dest_dir/${MANIFEST_FILE}.tmp" "$dest_dir/$MANIFEST_FILE" 2>/dev/null || true
     else
         sed -i.bak "s/\"checksum\": \"\"/\"checksum\": \"$checksum\"/" "$dest_dir/$MANIFEST_FILE" 2>/dev/null || true
-        rm -f "$dest_dir/${MANIFEST_FILE}.bak"
+        rm -f "$dest_dir/${MANIFEST_FILE}.bak" 2>/dev/null || true
     fi
-    
+
     print_status "Manifest created" "ok"
 }
 
@@ -1700,21 +1709,21 @@ do_backup() {
     # Backup type
     print_section "Backup Type"
     echo ""
-    echo -e "  ${BOLD}Full Backup${NC} - For personal use (includes sensitive data)"
-    echo -e "    ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
-    echo -e "    ${GREEN}✓${NC} Starship configuration"
-    echo -e "    ${GREEN}✓${NC} Git config ${YELLOW}(includes user.name, user.email)${NC}"
-    echo -e "    ${GREEN}✓${NC} SSH keys ${YELLOW}(private keys included)${NC}"
-    echo -e "    ${GREEN}✓${NC} Conda environments"
-    echo -e "    ${GREEN}✓${NC} Shell history"
+    echo -e "  ${GRAY}[1]${NC} ${BOLD}Full Backup${NC} - For personal use (includes sensitive data)"
+    echo -e "      ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
+    echo -e "      ${GREEN}✓${NC} Starship configuration"
+    echo -e "      ${GREEN}✓${NC} Git config ${YELLOW}(includes user.name, user.email)${NC}"
+    echo -e "      ${GREEN}✓${NC} SSH keys ${YELLOW}(private keys included)${NC}"
+    echo -e "      ${GREEN}✓${NC} Conda environments"
+    echo -e "      ${GREEN}✓${NC} Shell history"
     echo ""
-    echo -e "  ${BOLD}Shareable Backup${NC} - Safe to share publicly (excludes sensitive data)"
-    echo -e "    ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
-    echo -e "    ${GREEN}✓${NC} Starship configuration"
-    echo -e "    ${RED}✗${NC} Git config ${GRAY}(excluded)${NC}"
-    echo -e "    ${RED}✗${NC} SSH keys ${GRAY}(excluded)${NC}"
-    echo -e "    ${RED}✗${NC} Conda environments ${GRAY}(excluded)${NC}"
-    echo -e "    ${RED}✗${NC} Shell history ${GRAY}(excluded)${NC}"
+    echo -e "  ${GRAY}[2]${NC} ${BOLD}Shareable Backup${NC} - Safe to share publicly (excludes sensitive data)"
+    echo -e "      ${GREEN}✓${NC} Shell configs (.bashrc, .zshrc, etc.)"
+    echo -e "      ${GREEN}✓${NC} Starship configuration"
+    echo -e "      ${RED}✗${NC} Git config ${GRAY}(excluded)${NC}"
+    echo -e "      ${RED}✗${NC} SSH keys ${GRAY}(excluded)${NC}"
+    echo -e "      ${RED}✗${NC} Conda environments ${GRAY}(excluded)${NC}"
+    echo -e "      ${RED}✗${NC} Shell history ${GRAY}(excluded)${NC}"
     echo ""
 
     local type_choice
@@ -1929,6 +1938,10 @@ do_backup() {
     else
         print_status "Cloud credentials (excluded)" "skip"
     fi
+
+    echo ""
+    print_section "Finalizing Backup"
+    echo ""
 
     # Create manifest
     echo -e "  ${GRAY}Creating backup manifest...${NC}"
