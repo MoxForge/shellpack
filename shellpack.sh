@@ -1156,36 +1156,42 @@ backup_conda() {
 }
 
 backup_history() {
-    local dest_dir="$1"
-    
-    mkdir -p "$dest_dir/config/history"
-    
-    local found=0
-    
-    if ! $DRY_RUN; then
-        # Fish history
-        if [[ -f "$HOME/.local/share/fish/fish_history" ]]; then
-            cp "$HOME/.local/share/fish/fish_history" "$dest_dir/config/history/"
-            ((found++))
-        fi
-        
-        # Bash history
-        if [[ -f "$HOME/.bash_history" ]]; then
-            cp "$HOME/.bash_history" "$dest_dir/config/history/"
-            ((found++))
-        fi
-        
-        # Zsh history
-        if [[ -f "$HOME/.zsh_history" ]]; then
-            cp "$HOME/.zsh_history" "$dest_dir/config/history/"
-            ((found++))
+    local backup_dir="$1"
+    local history_dir="$backup_dir/history"
+    mkdir -p "$history_dir"
+
+    if [[ -n "$DRY_RUN" ]]; then
+        print_status "[DRY RUN] Would backup shell history" "info"
+        return 0
+    fi
+
+    local found=false
+
+    # Bash history
+    if [[ -f "$HOME/.bash_history" ]]; then
+        if cp "$HOME/.bash_history" "$history_dir/" 2>/dev/null; then
+            found=true
         fi
     fi
-    
-    if [[ $found -gt 0 ]] || $DRY_RUN; then
+
+    # Zsh history
+    if [[ -f "$HOME/.zsh_history" ]]; then
+        if cp "$HOME/.zsh_history" "$history_dir/" 2>/dev/null; then
+            found=true
+        fi
+    fi
+
+    # Fish history
+    if [[ -d "$HOME/.local/share/fish" ]]; then
+        if cp -r "$HOME/.local/share/fish" "$history_dir/" 2>/dev/null; then
+            found=true
+        fi
+    fi
+
+    if [[ "$found" == "true" ]]; then
         print_status "Shell history" "ok"
     else
-        print_status "Shell history not found" "skip"
+        print_status "Shell history (not found)" "skip"
     fi
 }
 
@@ -1994,20 +2000,24 @@ do_backup() {
     fi
 
     if $include_history; then
+        echo -e "  ${GRAY}[DEBUG] Starting history backup...${NC}" >&2
         backup_history "$backup_dir"
+        echo -e "  ${GRAY}[DEBUG] History backup completed${NC}" >&2
     else
         print_status "Shell history (excluded)" "skip"
     fi
 
     if $include_cloud_creds; then
+        echo -e "  ${GRAY}[DEBUG] Starting cloud credentials backup...${NC}" >&2
         backup_cloud_creds "$backup_dir"
+        echo -e "  ${GRAY}[DEBUG] Cloud credentials backup completed${NC}" >&2
     else
         print_status "Cloud credentials (excluded)" "skip"
     fi
 
     echo ""
+    echo -e "  ${GRAY}[DEBUG] Starting finalization...${NC}"
     print_section "Finalizing Backup"
-    echo ""
 
     # Create manifest
     echo -e "  ${GRAY}Creating backup manifest...${NC}"
