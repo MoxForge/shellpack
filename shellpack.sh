@@ -1160,7 +1160,7 @@ backup_history() {
     local history_dir="$backup_dir/history"
     mkdir -p "$history_dir"
 
-    if [[ -n "$DRY_RUN" ]]; then
+    if $DRY_RUN; then
         print_status "[DRY RUN] Would backup shell history" "info"
         return 0
     fi
