@@ -340,7 +340,7 @@ function Start-Backup {
     Write-Section "Running Backup"
     Write-Host ""
     
-    wsl -d $selectedDistro -- bash -c "python3 <(curl -sL $Script:GITHUB_RAW/run.py) backup"
+    wsl -d $selectedDistro -- bash -lc "python3 <(curl -sL $Script:GITHUB_RAW/run.py) backup"
     $exitCode = $LASTEXITCODE
     
     Write-Host ""
@@ -520,7 +520,7 @@ function Start-RestoreNewWSL {
     Write-Host ""
     
     if (-not $DryRun) {
-        wsl -d $wslName -u $username -- bash -c "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore"
+        wsl -d $wslName -u $username -- bash -lc "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore"
         $exitCode = $LASTEXITCODE
         
         Write-Host ""
@@ -573,7 +573,7 @@ function Start-RestoreExistingWSL {
     Write-Section "Running Restore"
     Write-Host ""
     
-    wsl -d $selectedDistro -- bash -c "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore"
+    wsl -d $selectedDistro -- bash -lc "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore"
     $exitCode = $LASTEXITCODE
     
     Write-Host ""
