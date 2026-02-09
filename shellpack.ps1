@@ -342,7 +342,25 @@ function Start-Backup {
     Write-Host "    Executing backup script inside WSL..." -ForegroundColor Gray
     Write-Host ""
     
-    wsl -d $selectedDistro -- bash -c "bash <(curl -sL $Script:GITHUB_RAW/shellpack.sh) backup"
+    $output = wsl -d $selectedDistro -- bash -c "python3 <(curl -sL $Script:GITHUB_RAW/run.py) backup 2>&1; echo EXIT_CODE:\$?"
+    
+    $exitCode = 0
+    if ($output -match "EXIT_CODE:(\d+)") {
+        $exitCode = [int]$Matches[1]
+    }
+    
+    Write-Host ""
+    if ($exitCode -ne 0) {
+        Write-Status "Backup failed with exit code: $exitCode" "error"
+        Write-Host ""
+        Write-Host "    Troubleshooting tips:" -ForegroundColor Yellow
+        Write-Host "        - Check if Python 3 is installed: python3 --version" -ForegroundColor Gray
+        Write-Host "        - Check SSH key setup: ssh -T git@github.com" -ForegroundColor Gray
+        Write-Host "        - Check network connectivity: curl -I https://github.com" -ForegroundColor Gray
+        Write-Host ""
+    } else {
+        Write-Status "Backup completed successfully" "ok"
+    }
 }
 
 #===============================================================================
@@ -514,7 +532,19 @@ function Start-RestoreNewWSL {
     Write-Host ""
     
     if (-not $DryRun) {
-        wsl -d $wslName -u $username -- bash -c "bash <(curl -sL $Script:GITHUB_RAW/shellpack.sh) restore"
+        $output = wsl -d $wslName -u $username -- bash -c "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore 2>&1; echo EXIT_CODE:\$?"
+        
+        $exitCode = 0
+        if ($output -match "EXIT_CODE:(\d+)") {
+            $exitCode = [int]$Matches[1]
+        }
+        
+        Write-Host ""
+        if ($exitCode -ne 0) {
+            Write-Status "Restore failed with exit code: $exitCode" "error"
+        } else {
+            Write-Status "Restore completed successfully" "ok"
+        }
     }
     
     # Success
@@ -559,7 +589,19 @@ function Start-RestoreExistingWSL {
     Write-Section "Running Restore"
     Write-Host ""
     
-    wsl -d $selectedDistro -- bash -c "bash <(curl -sL $Script:GITHUB_RAW/shellpack.sh) restore"
+    $output = wsl -d $selectedDistro -- bash -c "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore 2>&1; echo EXIT_CODE:\$?"
+    
+    $exitCode = 0
+    if ($output -match "EXIT_CODE:(\d+)") {
+        $exitCode = [int]$Matches[1]
+    }
+    
+    Write-Host ""
+    if ($exitCode -ne 0) {
+        Write-Status "Restore failed with exit code: $exitCode" "error"
+    } else {
+        Write-Status "Restore completed successfully" "ok"
+    }
 }
 
 #===============================================================================
