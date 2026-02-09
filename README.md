@@ -454,5 +454,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 <p align="center">
-  Made with care by <a href="https://github.com/MoxForge">MoxForge</a>
+  Made with care by <a href="https://github.com/MoxForge">Mox</a>
 </p>
