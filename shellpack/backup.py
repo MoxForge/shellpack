@@ -258,6 +258,60 @@ def backup_cloud_creds(dest_dir: Path) -> None:
         print_status("Cloud credentials not found", "skip")
 
 
+def create_backup_readme(git_dir: Path, backup_name: str, repo_url: str) -> None:
+    readme_content = f"""# Shell Environment Backup
+
+This repository contains shell environment backups created with [ShellPack](https://github.com/MoxForge/shellpack).
+
+## Latest Backup
+
+- **Name:** `{backup_name}`
+- **Location:** `backups/{backup_name}/`
+
+## How to Restore
+
+### On macOS / Linux / WSL (Bash/Zsh)
+
+```bash
+python3 <(curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py) restore
+```
+
+### On Fish Shell
+
+```fish
+python3 (curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py | psub) restore
+```
+
+### On Windows (PowerShell)
+
+```powershell
+iex (irm https://raw.githubusercontent.com/MoxForge/shellpack/main/shellpack.ps1)
+```
+
+Then select "Restore" and enter this repository URL when prompted:
+```
+{repo_url}
+```
+
+## What's Included
+
+Each backup in `backups/` contains:
+- `manifest.json` - Backup metadata and checksums
+- `shells/` - Shell configurations (fish, bash, zsh, oh-my-zsh)
+- `packages/` - Package manager lists (apt, brew, pacman, etc.)
+- `config/` - Additional configs (starship, git, cloud credentials)
+- `ssh/` - SSH keys (if included)
+- `conda/` - Conda environment exports (if included)
+- `history/` - Shell history (if included)
+
+## More Information
+
+For detailed documentation, visit: https://github.com/MoxForge/shellpack
+"""
+    readme_path = git_dir / "README.md"
+    readme_path.write_text(readme_content)
+
+
 def estimate_backup_size(
     shells: List[str], include_git_config: bool, include_ssh: bool,
     include_conda: bool, include_history: bool,
@@ -503,6 +557,10 @@ def do_backup() -> None:
         print_error(f"Failed to copy backup files: {e}")
         raise SystemExit(1)
     print_status("Backup files copied", "ok")
+
+    print(f"  {Colors.GRAY}Creating README with restore instructions...{Colors.NC}")
+    create_backup_readme(git_dir, backup_name, repo_url)
+    print_status("README.md created", "ok")
 
     if push_to_repo(git_dir, f"Backup: {backup_name}"):
         print_status("Pushed to repository", "ok")
