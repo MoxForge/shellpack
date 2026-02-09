@@ -35,16 +35,28 @@
 
 **No installation required!** Run directly with Python 3.7+:
 
-### Backup (macOS / Linux / WSL)
+### Backup (Bash / Zsh)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py | python3 - backup
+python3 <(curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py) backup
 ```
 
-### Restore (macOS / Linux / WSL)
+### Backup (Fish Shell)
+
+```fish
+python3 (curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py | psub) backup
+```
+
+### Restore (Bash / Zsh)
 
 ```bash
-curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py | python3 - restore
+python3 <(curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py) restore
+```
+
+### Restore (Fish Shell)
+
+```fish
+python3 (curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py | psub) restore
 ```
 
 ### Windows PowerShell

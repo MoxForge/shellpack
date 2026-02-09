@@ -411,8 +411,9 @@ def verify_ssh_connection(repo_url: str) -> bool:
         return True
     host = m.group(1)
     print(f"  {Colors.GRAY}Verifying SSH connection...{Colors.NC}")
+    ssh_cmd = "/usr/bin/ssh" if Path("/usr/bin/ssh").exists() else "ssh"
     _, out, err = run_command(
-        ["ssh", "-T", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", f"git@{host}"],
+        [ssh_cmd, "-T", "-o", "StrictHostKeyChecking=no", "-o", "ConnectTimeout=10", f"git@{host}"],
         check=False, timeout=15,
     )
     combined = out + err
