@@ -1,5 +1,5 @@
 <p align="center">
-  <h1 align="center">🔄 ShellPack</h1>
+  <h1 align="center">ShellPack</h1>
   <p align="center">
     <strong>Cross-Platform Shell Environment Backup & Restore</strong>
   </p>
@@ -8,14 +8,15 @@
     One command. Zero hassle.
   </p>
   <p align="center">
-    <a href="#-quick-start">Quick Start</a> •
-    <a href="#-features">Features</a> •
-    <a href="#-usage">Usage</a> •
-    <a href="#-what-gets-backed-up">What's Backed Up</a> •
-    <a href="#-faq">FAQ</a>
+    <a href="#quick-start">Quick Start</a> &bull;
+    <a href="#features">Features</a> &bull;
+    <a href="#usage">Usage</a> &bull;
+    <a href="#what-gets-backed-up">What's Backed Up</a> &bull;
+    <a href="#faq">FAQ</a>
   </p>
   <p align="center">
-    <img src="https://img.shields.io/badge/version-1.0.0-blue.svg" alt="Version">
+    <img src="https://img.shields.io/badge/version-2.0.0-blue.svg" alt="Version">
+    <img src="https://img.shields.io/badge/python-3.7+-blue.svg" alt="Python">
     <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="License">
     <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20WSL-lightgrey.svg" alt="Platform">
     <img src="https://img.shields.io/badge/shells-Fish%20%7C%20Bash%20%7C%20Zsh-orange.svg" alt="Shells">
@@ -24,94 +25,113 @@
 
 ---
 
-> **🎉 Version 1.0.0 - Production Ready!**
-> ShellPack has been enhanced with comprehensive security features, automatic rollback, retry logic, and improved error handling. See [IMPROVEMENTS.md](IMPROVEMENTS.md) for details.
+> **Version 2.0.0 - Complete Python Rewrite**
+> 
+> ShellPack has been completely rewritten in Python for improved reliability, better error handling, and cross-platform consistency. See [CHANGELOG.md](CHANGELOG.md) for details.
 
 ---
 
-## ⚡ Quick Start
+## Quick Start
 
-**No installation required!** Run directly from GitHub:
+**No installation required!** Run directly with Python 3.7+:
 
 ### Backup (macOS / Linux / WSL)
+
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/shellpack.sh) backup
+curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py | python3 - backup
 ```
 
 ### Restore (macOS / Linux / WSL)
+
 ```bash
-bash <(curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/shellpack.sh) restore
+curl -sL https://raw.githubusercontent.com/MoxForge/shellpack/main/run.py | python3 - restore
 ```
 
 ### Windows PowerShell
+
 ```powershell
 iex (irm https://raw.githubusercontent.com/MoxForge/shellpack/main/shellpack.ps1)
 ```
 
+### Local Installation (Optional)
+
+```bash
+git clone https://github.com/MoxForge/shellpack.git
+cd shellpack
+python3 shellpack.py backup
+```
+
 ---
 
-## ✨ Features
+## Features
 
 | Feature | Description |
 |---------|-------------|
-| 🌍 **Cross-Platform** | Works on macOS, Linux (Ubuntu, Debian, Fedora, Arch), and Windows WSL |
-| 🚀 **Zero Installation** | Run directly from GitHub with a single command |
-| 🔄 **Bi-directional** | Backup from any OS, restore to any OS |
-| 📦 **Complete Backup** | Shell configs, packages, conda, SSH keys, and more |
-| 🔒 **Shareable Mode** | Create backups safe to share publicly |
-| 🆕 **Safe Restore** | Creates NEW WSL instances, never touches existing ones |
-| ✅ **Integrity Check** | SHA-256 checksums verify backup integrity |
-| 🎨 **Beautiful CLI** | Colored output, progress indicators, clear prompts |
-| 🔐 **Security First** | Input validation, SSH key backup, secure password handling |
-| 🔄 **Auto-Retry** | Network operations retry with exponential backoff |
-| ↩️ **Rollback Support** | Automatic rollback on failed operations |
-| 💾 **Smart Checks** | Disk space verification and backup size estimation |
-| 🔑 **Git Credentials** | Automatic credential helper setup for seamless Git operations |
+| **Cross-Platform** | Works on macOS, Linux (Ubuntu, Debian, Fedora, Arch), and Windows WSL |
+| **Zero Installation** | Run directly from GitHub with a single command |
+| **Pure Python** | No dependencies beyond Python 3.7+ standard library |
+| **Bi-directional** | Backup from any OS, restore to any OS |
+| **Complete Backup** | Shell configs, packages, conda, SSH keys, and more |
+| **Shareable Mode** | Create backups safe to share publicly |
+| **Safe Restore** | Creates NEW WSL instances, never touches existing ones |
+| **Integrity Check** | SHA-256 checksums verify backup integrity |
+| **Beautiful CLI** | Colored output, progress indicators, clear prompts |
+| **Input Validation** | Comprehensive validation prevents injection attacks |
+| **Auto-Retry** | Network operations retry with exponential backoff |
+| **Rollback Support** | Automatic rollback on failed operations |
+| **Disk Space Checks** | Verifies sufficient space before operations |
+| **Git Credentials** | Automatic credential helper setup |
 
 ---
 
-## 📖 Usage
+## Usage
 
 ### Backup Your Environment
 
 ```bash
-shellpack backup
+python3 shellpack.py backup
 ```
 
 The script will:
-1. Ask for your backup Git repository URL
-2. Let you name your backup (default: `{shell}-{hostname}-{date}`)
-3. Choose backup type:
+
+1. Verify dependencies (git, curl, tar)
+2. Ask for your backup Git repository URL
+3. Let you name your backup (default: `{shell}-{hostname}-{date}`)
+4. Choose backup type:
    - **Full backup**: Personal use (includes SSH keys, Git config, history, Conda)
    - **Shareable backup**: Safe to share publicly (excludes sensitive data)
-4. Select which data to include
-5. Push everything to your repository
+5. Select which data to include
+6. Estimate backup size and verify disk space
+7. Create the backup and push to your repository
 
 ### Restore Your Environment
 
 ```bash
-shellpack restore
+python3 shellpack.py restore
 ```
 
 The script will:
+
 1. Ask for your backup repository URL
 2. Show available backups - pick one
-3. Handle SSH keys (restore, generate new, or skip)
-4. Install shells and tools automatically
-5. Restore all configurations
+3. Verify backup integrity via checksums
+4. Handle SSH keys (restore, generate new, or skip)
+5. Install shells and tools automatically
+6. Restore all configurations
+7. Optionally set your default shell
 
 ### Command Line Options
 
 ```bash
-shellpack backup              # Backup environment
-shellpack restore             # Restore environment
-shellpack --help              # Show help
-shellpack --version           # Show version
-shellpack --verbose backup    # Verbose output
-shellpack --dry-run restore   # Preview without changes
+python3 shellpack.py backup              # Backup environment
+python3 shellpack.py restore             # Restore environment
+python3 shellpack.py help                # Show help
+python3 shellpack.py version             # Show version
+python3 shellpack.py --verbose backup    # Verbose output
+python3 shellpack.py --dry-run restore   # Preview without changes
 ```
 
-### PowerShell Options
+### PowerShell Options (Windows)
 
 ```powershell
 # Interactive menu
@@ -130,278 +150,291 @@ iex (irm https://raw.githubusercontent.com/MoxForge/shellpack/main/shellpack.ps1
 
 ---
 
-## 📦 What Gets Backed Up
+## What Gets Backed Up
 
 | Component | macOS | Linux | WSL | Notes |
 |-----------|:-----:|:-----:|:---:|-------|
-| **Fish Shell** | ✅ | ✅ | ✅ | Config, functions, completions |
-| **Bash** | ✅ | ✅ | ✅ | .bashrc, .bash_profile, aliases |
-| **Zsh** | ✅ | ✅ | ✅ | .zshrc + Oh-My-Zsh |
-| **Starship** | ✅ | ✅ | ✅ | starship.toml |
-| **Packages** | brew | apt/dnf/pacman | apt | Package lists |
-| **Conda** | ✅ | ✅ | ✅ | All environments |
-| **Git Config** | ✅ | ✅ | ✅ | .gitconfig |
-| **SSH Keys** | ✅ | ✅ | ✅ | Optional |
-| **Cloud Creds** | ✅ | ✅ | ✅ | AWS/Azure/GCP (optional) |
-| **History** | ✅ | ✅ | ✅ | Optional |
+| **Fish Shell** | Yes | Yes | Yes | Config, functions, completions, themes |
+| **Bash** | Yes | Yes | Yes | .bashrc, .bash_profile, .bash_aliases |
+| **Zsh** | Yes | Yes | Yes | .zshrc, .zprofile + Oh-My-Zsh |
+| **Starship** | Yes | Yes | Yes | starship.toml |
+| **Packages** | brew | apt/dnf/pacman | apt | Package lists for reinstallation |
+| **Conda** | Yes | Yes | Yes | All environments exported to YAML |
+| **Git Config** | Yes | Yes | Yes | .gitconfig (optional) |
+| **SSH Keys** | Yes | Yes | Yes | Full .ssh directory (optional) |
+| **Cloud Creds** | Yes | Yes | Yes | AWS, Azure, GCP configs (optional) |
+| **History** | Yes | Yes | Yes | Shell history files (optional) |
 
 ---
 
-## 🔐 Backup Types
+## Backup Types
 
 ### Full Backup (Personal Use)
-- Includes everything: SSH keys, credentials, history
-- ⚠️ Keep your backup repository **private**
 
-### Shareable Backup
-- Safe to share publicly
-- Automatically excludes:
-  - SSH keys
-  - Git identity (name/email)
-  - Cloud credentials
-  - Shell history
-- Great for sharing your shell setup with others
+Includes everything for complete environment restoration:
 
----
+- All shell configurations
+- SSH keys (private and public)
+- Git configuration (name, email, settings)
+- Conda environments
+- Shell history
+- Cloud credentials
 
-## 💡 Example Workflows
+> **Important**: Keep your backup repository **private** when using full backup mode.
 
-### New Machine Setup
+### Shareable Backup (Safe to Share)
 
-```bash
-# On your new MacBook/Linux machine, just run:
-bash <(curl -sL .../shellpack.sh) restore
+Safe for public repositories - automatically excludes:
 
-# Enter your backup repo URL, pick a backup, done!
-# All your tools, configs, and environments are restored.
-```
+- SSH keys
+- Git identity (name/email)
+- Cloud credentials (AWS, Azure, GCP)
+- Shell history
 
-### Sync Work and Home
-
-```bash
-# At work (Linux):
-shellpack backup
-# Creates: fish-work-pc-20250210
-
-# At home (macOS):
-shellpack restore
-# Select the work backup
-# Your work environment is now on your Mac!
-```
-
-### Share Your Setup
-
-```bash
-# Create a shareable backup:
-shellpack backup
-# Choose "Shareable backup"
-
-# Share the repo URL with colleagues
-# They run restore and get your shell setup (without your secrets)
-```
+Perfect for sharing your shell setup with colleagues or the community.
 
 ---
 
-## 🗂️ Repository Structure
+## Repository Structure
 
 After backup, your repository will contain:
 
 ```
 your-backup-repo/
 ├── backups/
-│   ├── fish-macbook-20250210/
-│   │   ├── manifest.json           # Backup metadata + checksum
-│   │   ├── shells/
-│   │   │   ├── fish/
-│   │   │   │   └── fish_config.tar.gz
-│   │   │   ├── bash/
-│   │   │   │   ├── .bashrc
-│   │   │   │   └── .bash_profile
-│   │   │   └── zsh/
-│   │   │       ├── .zshrc
-│   │   │       └── ohmyzsh.tar.gz
-│   │   ├── packages/
-│   │   │   ├── brew_formula.txt
-│   │   │   └── brew_cask.txt
-│   │   ├── conda/
-│   │   │   ├── base.yml
-│   │   │   └── ml.yml
-│   │   ├── config/
-│   │   │   ├── starship.toml
-│   │   │   └── .gitconfig
-│   │   └── ssh/
-│   │       └── ssh_backup.tar.gz
-│   └── fish-wsl-20250115/
-│       └── ...
+│   └── fish-macbook-20260209/
+│       ├── manifest.json           # Backup metadata + checksums
+│       ├── shells/
+│       │   ├── fish/
+│       │   │   └── fish_config.tar.gz
+│       │   ├── bash/
+│       │   │   ├── .bashrc
+│       │   │   └── .bash_profile
+│       │   └── zsh/
+│       │       ├── .zshrc
+│       │       └── ohmyzsh.tar.gz
+│       ├── packages/
+│       │   ├── brew_formula.txt
+│       │   └── brew_cask.txt
+│       ├── conda/
+│       │   ├── base.yml
+│       │   └── myenv.yml
+│       ├── config/
+│       │   ├── starship.toml
+│       │   └── .gitconfig
+│       └── ssh/
+│           └── ssh_backup.tar.gz
 ```
 
 ---
 
-## 🛠️ Requirements
+## Requirements
+
+### All Platforms
+
+- **Python 3.7+** (pre-installed on most systems)
+- **Git** (for repository operations)
+- **curl** (for one-liner installation)
+- **tar** (for archive operations)
 
 ### macOS
-- Git (install with `xcode-select --install`)
-- curl (pre-installed)
+
+```bash
+# Git is included with Xcode Command Line Tools
+xcode-select --install
+```
 
 ### Linux
+
 ```bash
-sudo apt install git curl  # Ubuntu/Debian
-sudo dnf install git curl  # Fedora
-sudo pacman -S git curl    # Arch
+# Ubuntu/Debian
+sudo apt install git curl python3
+
+# Fedora
+sudo dnf install git curl python3
+
+# Arch
+sudo pacman -S git curl python
 ```
 
 ### Windows
-- WSL2 (`wsl --install`)
-- Git for Windows (optional, for direct Git operations)
+
+- **WSL2**: `wsl --install`
+- **Git for Windows**: Optional, for direct Git operations
 
 ---
 
-## ❓ FAQ
+## Security
+
+ShellPack is built with security as a priority:
+
+### Input Validation
+
+- **Git URL Validation**: All repository URLs are validated against injection attacks
+- **Backup Name Sanitization**: Names are sanitized to prevent path traversal
+- **Email Validation**: Email addresses are validated for SSH key generation
+
+### SSH Key Security
+
+- **Automatic Backup**: Existing SSH keys are backed up before generating new ones
+- **Passphrase Support**: Optional passphrase protection for new keys
+- **Proper Permissions**: Automatic permission setting (700 for .ssh, 600 for private keys)
+
+### Network Security
+
+- **Retry Logic**: Network operations retry with exponential backoff
+- **SSH Verification**: SSH connections are verified before Git operations
+- **Timeout Protection**: All network operations have sensible timeouts
+
+### Credential Management
+
+Platform-specific credential helpers are automatically configured:
+
+| Platform | Credential Helper |
+|----------|-------------------|
+| macOS | osxkeychain |
+| Linux | libsecret, pass, or cache |
+| WSL | Git Credential Manager or cache |
+
+---
+
+## FAQ
 
 <details>
 <summary><strong>Will restore overwrite my existing WSL?</strong></summary>
 
-**No!** On Windows, restore creates a NEW WSL instance with a name you choose. Your existing distributions are never touched.
+**No.** On Windows, restore creates a NEW WSL instance with a name you choose. Your existing distributions are never touched.
 </details>
 
 <details>
 <summary><strong>Can I backup from Mac and restore on Linux?</strong></summary>
 
-**Yes!** That's the whole point. Shell configs are compatible. Package managers differ (brew vs apt), but ShellPack handles that by storing package lists for each platform.
+**Yes.** That's the whole point. Shell configs are compatible across platforms. Package managers differ (brew vs apt), but ShellPack stores package lists for each platform separately.
 </details>
 
 <details>
 <summary><strong>Is my data safe?</strong></summary>
 
-- **Full backups** contain sensitive data → Keep your repo **private**
-- **Shareable backups** exclude all secrets → Safe to make **public**
+- **Full backups** contain sensitive data - keep your repo **private**
+- **Shareable backups** exclude all secrets - safe to make **public**
 - All backups include SHA-256 checksums for integrity verification
 </details>
 
 <details>
 <summary><strong>What if I don't have Fish/Zsh installed on the new machine?</strong></summary>
 
-ShellPack automatically installs any shells that were in your backup. It detects your package manager (apt, brew, dnf, pacman) and installs appropriately.
+ShellPack automatically detects missing shells and offers to install them. It detects your package manager (apt, brew, dnf, pacman) and installs appropriately.
 </details>
 
 <details>
 <summary><strong>Can I have multiple backups?</strong></summary>
 
-ShellPack automatically installs any shells that were in your backup. It detects your package manager (apt, brew, dnf, pacman) and installs appropriately.
-</details>
-
----
-
-## 🔒 Security Features
-
-ShellPack is built with security as a priority:
-
-### Input Validation
-- **Git URL Validation**: All repository URLs are validated to prevent injection attacks
-- **Backup Name Sanitization**: Backup names are sanitized to prevent path traversal attacks
-- **Email Validation**: Email addresses are validated for SSH key generation
-
-### SSH Key Security
-- **Automatic Backup**: Existing SSH keys are backed up before generating new ones
-- **Passphrase Protection**: Optional passphrase support for SSH keys
-- **Proper Permissions**: Automatic permission setting (700 for .ssh, 600 for private keys, 644 for public keys)
-
-### Secure Password Handling (PowerShell)
-- **SecureString**: Passwords are handled as SecureString objects
-- **Memory Cleanup**: Passwords are cleared from memory after use
-- **No Plain Text Storage**: Passwords are never stored in plain text
-
-### Network Security
-- **Retry Logic**: Network operations retry with exponential backoff
-- **Error Handling**: Comprehensive error checking for all operations
-- **Rollback Support**: Failed operations can be automatically rolled back
-
-### Git Credential Management
-- **Platform-Specific Helpers**: Automatic detection and setup of credential helpers
-  - macOS: osxkeychain
-  - Linux: libsecret, pass, or cache
-  - WSL: Git Credential Manager (Windows) or cache
-
----
-
-## 🤝 Contributing
-
-**Yes!** Each backup has a unique name (default: `shell-hostname-date`). You can keep as many as you want in your repository.
+**Yes.** Each backup has a unique name (default: `shell-hostname-date`). You can keep as many as you want in your repository and select which one to restore.
 </details>
 
 <details>
 <summary><strong>How do I update ShellPack?</strong></summary>
 
-No update needed! The one-liner always fetches the latest version from GitHub.
+No update needed when using the one-liner - it always fetches the latest version from GitHub. For local installations, just `git pull`.
 </details>
 
 <details>
-<summary><strong>What security measures are in place?</strong></summary>
+<summary><strong>What if the backup/restore fails?</strong></summary>
 
-ShellPack includes comprehensive security features:
-- Input validation for all user inputs (URLs, backup names, emails)
-- Automatic SSH key backup before generating new keys
-- Secure password handling with memory cleanup (PowerShell)
-- Proper file permissions for SSH keys
-- Git credential helper support for secure authentication
-- Rollback mechanism for failed operations
-
-See the [Security Features](#-security-features) section for details.
+ShellPack includes automatic rollback support. If an operation fails, it will offer to revert any changes made. You can also check the log file at `~/.shellpack/shellpack.log` for detailed error information.
 </details>
 
 <details>
-<summary><strong>Backup process stops or hangs - what should I do?</strong></summary>
+<summary><strong>Why Python instead of Bash?</strong></summary>
 
-If your backup stops after "SSH keys" or appears to hang:
+The v2.0.0 rewrite to Python provides:
+- **Better error handling**: No more silent failures from `set -e`
+- **Cross-platform consistency**: Same code runs everywhere
+- **Easier maintenance**: Modular code structure
+- **Improved reliability**: Proper exception handling and cleanup
+</details>
 
-1. **Check Conda**: If you have Conda installed, it might be taking time to export environments. The script now has a 30-second timeout per environment.
+---
 
-2. **Check Git Authentication**: Ensure your SSH key is added to GitHub/GitLab:
+## Troubleshooting
+
+### Backup stops or hangs
+
+1. **Check SSH authentication**:
    ```bash
    ssh -T git@github.com
    ```
 
-3. **Check the Log File**: View detailed logs at `~/.shellpack/shellpack.log`
-
-4. **Try with Verbose Mode**:
+2. **View detailed logs**:
    ```bash
-   shellpack --verbose backup
+   cat ~/.shellpack/shellpack.log
    ```
 
-5. **Manual Push**: If backup completes but push fails, you can manually push:
+3. **Run with verbose mode**:
+   ```bash
+   python3 shellpack.py --verbose backup
+   ```
+
+4. **Manual push** (if backup completes but push fails):
    ```bash
    cd ~/.shellpack/temp/git
    git push -u origin main
    ```
 
-Common issues:
-- **Conda timeout**: Large Conda environments may timeout - this is normal, the script will continue
-- **SSH authentication**: Make sure your SSH key is added to your Git provider
-- **Network issues**: Check your internet connection
-- **Repository access**: Verify you have write access to the repository
-</details>
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| SSH authentication failed | Add your SSH key to GitHub/GitLab |
+| Permission denied | Check file permissions, run with appropriate privileges |
+| Conda timeout | Large environments may take time - check logs |
+| Git push rejected | Ensure you have write access to the repository |
 
 ---
 
-## 🤝 Contributing
+## Project Structure
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+```
+shellpack/
+├── shellpack/
+│   ├── __init__.py      # Package metadata
+│   ├── core.py          # Utilities, config, UI, Git operations
+│   ├── backup.py        # Backup functionality
+│   ├── restore.py       # Restore functionality
+│   └── cli.py           # Command-line interface
+├── shellpack.py         # Main entry point
+├── run.py               # One-liner launcher
+├── shellpack.sh         # Legacy Bash script (deprecated)
+├── shellpack.ps1        # PowerShell wrapper for Windows
+├── README.md
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+└── LICENSE
+```
+
+---
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+3. Make your changes
+4. Run tests: `python3 -c "from shellpack import core, backup, restore, cli"`
+5. Commit your changes (`git commit -m 'Add amazing feature'`)
+6. Push to the branch (`git push origin feature/amazing-feature`)
+7. Open a Pull Request
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Inspired by the need to sync development environments across machines
 - Built with love for the terminal community
@@ -409,5 +442,5 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ---
 
 <p align="center">
-  Made with ❤️ by <a href="https://github.com/MoxForge">MoxForge</a>
+  Made with care by <a href="https://github.com/MoxForge">MoxForge</a>
 </p>
