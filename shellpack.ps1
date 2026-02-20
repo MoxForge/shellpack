@@ -531,6 +531,8 @@ function Start-RestoreNewWSL {
                 return
             }
 
+            wsl -d $wslName -- bash -c "echo '$username ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$username && chmod 440 /etc/sudoers.d/$username" 2>&1 | Out-Null
+
             # Restart WSL to apply user
             $result = wsl --terminate $wslName 2>&1
             if ($LASTEXITCODE -ne 0) {
@@ -553,7 +555,8 @@ function Start-RestoreNewWSL {
         }
         wsl -d $wslName -- bash -c "useradd -m -s /bin/bash -G sudo $username 2>/dev/null; echo '${username}:${password}' | chpasswd" 2>&1 | Out-Null
         wsl -d $wslName -- bash -c "echo '[user]' > /etc/wsl.conf; echo 'default=$username' >> /etc/wsl.conf" 2>&1 | Out-Null
-        
+        wsl -d $wslName -- bash -c "echo '$username ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$username && chmod 440 /etc/sudoers.d/$username" 2>&1 | Out-Null
+
         # Restart WSL to apply user
         wsl --terminate $wslName 2>&1 | Out-Null
         Start-Sleep -Seconds 2
