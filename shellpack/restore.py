@@ -288,6 +288,8 @@ def install_shell(shell: str, pm: str) -> None:
     }
     cmd = install_cmds.get(shell, {}).get(pm)
     if cmd:
+        if pm == "apt":
+            run_command(["sudo", "apt-get", "update", "-qq"], check=False, timeout=120)
         run_command(cmd, check=False, timeout=120)
     if command_exists(shell):
         print_status(shell, "ok")
