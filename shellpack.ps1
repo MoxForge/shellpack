@@ -379,6 +379,54 @@ function Start-Restore {
     }
 }
 
+function Copy-SSHKeysToWSL {
+    param(
+        [string]$WslName,
+        [string]$Username
+    )
+
+    Write-Section "SSH Keys"
+    Write-Host ""
+
+    $sshDir = "$env:USERPROFILE\.ssh"
+
+    if (-not (Test-Path $sshDir)) {
+        Write-Status "No SSH keys found at $sshDir - skipping" "skip"
+        return
+    }
+
+    $keyFiles = Get-ChildItem $sshDir -File | Where-Object { $_.Name -match "^id_" }
+
+    if ($keyFiles.Count -eq 0) {
+        Write-Status "No SSH key files found in Windows .ssh directory - skipping" "skip"
+        return
+    }
+
+    Write-Host "    Found SSH keys in Windows:" -ForegroundColor White
+    foreach ($key in $keyFiles) {
+        Write-Item $key.Name
+    }
+    Write-Host ""
+
+    $copy = Read-YesNo "Copy Windows SSH keys to new WSL instance?" $true
+
+    if (-not $copy) {
+        Write-Status "SSH key copy skipped" "skip"
+        return
+    }
+
+    $winUsername = $env:USERNAME
+    $wslSshSource = "/mnt/c/Users/$winUsername/.ssh"
+
+    $result = wsl -d $WslName -u $Username -- bash -c "mkdir -p ~/.ssh && cp '$wslSshSource'/id_* ~/.ssh/ 2>/dev/null; [ -f '$wslSshSource/known_hosts' ] && cp '$wslSshSource/known_hosts' ~/.ssh/ 2>/dev/null; chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_* 2>/dev/null; true" 2>&1
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Status "SSH keys copied to WSL instance" "ok"
+    } else {
+        Write-Status "Could not copy SSH keys: $result" "warn"
+    }
+}
+
 function Start-RestoreNewWSL {
     # List existing distributions
     Write-Section "Existing WSL Instances"
@@ -512,7 +560,11 @@ function Start-RestoreNewWSL {
     }
     
     Write-Status "User '$username' created with sudo privileges" "ok"
-    
+
+    if (-not $DryRun) {
+        Copy-SSHKeysToWSL -WslName $wslName -Username $username
+    }
+
     # Run restore script
     Write-Section "Running Restore"
     Write-Host ""
