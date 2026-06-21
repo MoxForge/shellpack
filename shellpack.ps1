@@ -8,10 +8,10 @@
     Handles WSL instance creation and calls the bash script for backup/restore.
 
 .PARAMETER Action
-    The action to perform: backup, restore, help, or version
+    The action to perform: backup, restore, help, version, or sync
 
-.PARAMETER Verbose
-    Enable verbose output
+.PARAMETER UbuntuVersion
+    Ubuntu version for new WSL instances
 
 .PARAMETER DryRun
     Show what would be done without making changes
@@ -26,11 +26,14 @@
     # Restore
     .\shellpack.ps1 restore
 
+    # Sync
+    .\shellpack.ps1 sync
+
 .LINK
     https://github.com/MoxForge/shellpack
 
 .NOTES
-    Version: 1.0.0
+    Version: 2.1.0
     Author: MoxForge
     License: MIT
 #>
@@ -38,7 +41,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position=0)]
-    [ValidateSet('backup', 'restore', 'help', 'version', '')]
+    [ValidateSet('backup', 'restore', 'sync', 'help', 'version', '')]
     [string]$Action = '',
 
     [Parameter()]
@@ -51,11 +54,40 @@ param(
 # Configuration
 #===============================================================================
 
-$Script:VERSION = "1.0.0"
+$Script:VERSION = "2.1.0"
 $Script:SCRIPT_NAME = "shellpack"
 $Script:GITHUB_REPO = "https://github.com/MoxForge/shellpack"
 $Script:GITHUB_RAW = "https://raw.githubusercontent.com/MoxForge/shellpack/main"
 $Script:UBUNTU_VERSION = $UbuntuVersion
+
+#===============================================================================
+# Security Helpers
+#===============================================================================
+
+function Escape-BashSingleQuote {
+    <#
+    .SYNOPSIS
+        Escapes a string for safe use inside bash single quotes.
+    .DESCRIPTION
+        In bash, the only way to escape a single quote inside single quotes
+        is to end the quote, add an escaped quote, then start a new quote.
+        This prevents command injection when user input is passed to bash -c.
+    #>
+    param([string]$Value)
+    return $Value.Replace("'", "'\''")
+}
+
+function Test-SafeWslName {
+    <#
+    .SYNOPSIS
+        Validates that a WSL distribution name contains only safe characters.
+    #>
+    param([string]$Name)
+    if ($Name -match '^[a-zA-Z0-9_-]+$') {
+        return $true
+    }
+    return $false
+}
 
 #===============================================================================
 # Output Functions
@@ -93,21 +125,21 @@ function Write-Status {
         [ValidateSet('ok', 'error', 'warn', 'skip', 'info')]
         [string]$Status = 'info'
     )
-    
+
     $icon = switch ($Status) {
-        'ok'    { "[✓]"; $color = "Green" }
-        'error' { "[✗]"; $color = "Red" }
+        'ok'    { "[+]"; $color = "Green" }
+        'error' { "[x]"; $color = "Red" }
         'warn'  { "[!]"; $color = "Yellow" }
-        'skip'  { "[→]"; $color = "DarkGray" }
-        'info'  { "[•]"; $color = "Blue" }
+        'skip'  { "[->]"; $color = "DarkGray" }
+        'info'  { "[*]"; $color = "Blue" }
     }
-    
+
     Write-Host "    $icon $Message" -ForegroundColor $color
 }
 
 function Write-Item {
     param([string]$Message)
-    Write-Host "        • $Message" -ForegroundColor White
+    Write-Host "        - $Message" -ForegroundColor White
 }
 
 function Read-Input {
@@ -115,7 +147,7 @@ function Read-Input {
         [string]$Prompt,
         [string]$Default = ""
     )
-    
+
     if ($Default) {
         Write-Host -NoNewline "    $Prompt " -ForegroundColor Cyan
         Write-Host -NoNewline "[$Default]" -ForegroundColor DarkGray
@@ -123,9 +155,9 @@ function Read-Input {
     } else {
         Write-Host -NoNewline "    ${Prompt}: " -ForegroundColor Cyan
     }
-    
+
     $result = Read-Host
-    
+
     if ([string]::IsNullOrWhiteSpace($result)) {
         return $Default
     }
@@ -137,14 +169,14 @@ function Read-YesNo {
         [string]$Prompt,
         [bool]$Default = $true
     )
-    
+
     $hint = if ($Default) { "Y/n" } else { "y/N" }
     Write-Host -NoNewline "    $Prompt " -ForegroundColor Cyan
     Write-Host -NoNewline "[$hint]" -ForegroundColor DarkGray
     Write-Host -NoNewline ": " -ForegroundColor Cyan
-    
+
     $result = Read-Host
-    
+
     if ([string]::IsNullOrWhiteSpace($result)) {
         return $Default
     }
@@ -157,27 +189,27 @@ function Read-Choice {
         [string[]]$Options,
         [int]$Default = 1
     )
-    
+
     Write-Host ""
     for ($i = 0; $i -lt $Options.Count; $i++) {
         Write-Host "        [$($i + 1)] $($Options[$i])" -ForegroundColor White
     }
     Write-Host ""
-    
+
     do {
         Write-Host -NoNewline "    $Prompt " -ForegroundColor Cyan
         Write-Host -NoNewline "[$Default]" -ForegroundColor DarkGray
         Write-Host -NoNewline ": " -ForegroundColor Cyan
-        
+
         $input = Read-Host
-        
+
         if ([string]::IsNullOrWhiteSpace($input)) {
             $choice = $Default
         } else {
             $choice = [int]$input
         }
     } while ($choice -lt 1 -or $choice -gt $Options.Count)
-    
+
     return $choice
 }
 
@@ -192,10 +224,9 @@ function Read-SecurePassword {
 function ConvertFrom-SecureStringToPlainText {
     param([System.Security.SecureString]$SecureString)
 
+    $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
     try {
-        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
-        $plainText = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
-        return $plainText
+        return [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
     } finally {
         if ($BSTR -ne [IntPtr]::Zero) {
             [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
@@ -210,12 +241,12 @@ function ConvertFrom-SecureStringToPlainText {
 function Get-WSLDistributions {
     try {
         $output = wsl --list --quiet 2>&1
-        $distros = $output | Where-Object { 
-            $_ -and 
-            $_ -notmatch "^Windows" -and 
-            $_ -notmatch "^Usage:" 
-        } | ForEach-Object { 
-            $_.Trim() -replace '\x00', '' 
+        $distros = $output | Where-Object {
+            $_ -and
+            $_ -notmatch "^Windows" -and
+            $_ -notmatch "^Usage:"
+        } | ForEach-Object {
+            $_.Trim() -replace '\x00', ''
         }
         return $distros | Where-Object { $_ }
     } catch {
@@ -245,9 +276,9 @@ function Test-WSLAvailable {
 function Test-Dependencies {
     Write-Section "Checking Dependencies"
     Write-Host ""
-    
+
     $missing = @()
-    
+
     # Check WSL
     if (Test-WSLAvailable) {
         Write-Status "WSL" "ok"
@@ -255,7 +286,7 @@ function Test-Dependencies {
         Write-Status "WSL - NOT INSTALLED" "error"
         $missing += "WSL"
     }
-    
+
     # Check Git
     if (Get-Command git -ErrorAction SilentlyContinue) {
         Write-Status "Git" "ok"
@@ -279,14 +310,14 @@ function Test-Dependencies {
             $missing += "Git"
         }
     }
-    
+
     # Check curl (usually available in Windows 10+)
     if (Get-Command curl.exe -ErrorAction SilentlyContinue) {
         Write-Status "curl" "ok"
     } else {
         Write-Status "curl - not found (using Invoke-WebRequest)" "warn"
     }
-    
+
     if ($missing.Count -gt 0) {
         Write-Host ""
         Write-Host "    Missing dependencies: $($missing -join ', ')" -ForegroundColor Red
@@ -298,7 +329,7 @@ function Test-Dependencies {
         Write-Host ""
         return $false
     }
-    
+
     return $true
 }
 
@@ -309,14 +340,14 @@ function Test-Dependencies {
 function Start-Backup {
     Write-Banner
     Write-Header "Backup Shell Environment"
-    
+
     if (-not (Test-Dependencies)) {
         return
     }
-    
+
     # Get available WSL distributions
     $distros = Get-WSLDistributions
-    
+
     if (-not $distros -or $distros.Count -eq 0) {
         Write-Status "No WSL distributions found" "error"
         Write-Host ""
@@ -325,24 +356,24 @@ function Start-Backup {
         Write-Host ""
         return
     }
-    
+
     Write-Section "Select WSL Distribution"
     Write-Host ""
     Write-Host "    Available distributions:" -ForegroundColor White
-    
+
     $distroList = @($distros)
     $choice = Read-Choice "Choose distribution to backup" $distroList 1
     $selectedDistro = $distroList[$choice - 1]
-    
+
     Write-Status "Selected: $selectedDistro" "info"
-    
+
     # Run Python script inside WSL with real-time output
     Write-Section "Running Backup"
     Write-Host ""
-    
+
     wsl -d $selectedDistro -- bash -lc "python3 <(curl -sL $Script:GITHUB_RAW/run.py) backup"
     $exitCode = $LASTEXITCODE
-    
+
     Write-Host ""
     if ($exitCode -ne 0) {
         Write-Status "Backup failed with exit code: $exitCode" "error"
@@ -358,20 +389,20 @@ function Start-Backup {
 function Start-Restore {
     Write-Banner
     Write-Header "Restore Shell Environment"
-    
+
     if (-not (Test-Dependencies)) {
         return
     }
-    
+
     Write-Section "Restore Options"
     Write-Host ""
     Write-Host "    How do you want to restore?" -ForegroundColor White
-    
+
     $choice = Read-Choice "Select option" @(
         "Create NEW WSL instance (recommended - safe)",
         "Restore to EXISTING WSL instance"
     ) 1
-    
+
     if ($choice -eq 1) {
         Start-RestoreNewWSL
     } else {
@@ -415,10 +446,22 @@ function Copy-SSHKeysToWSL {
         return
     }
 
-    $winUsername = $env:USERNAME
+    $winUsername = Escape-BashSingleQuote -Value $env:USERNAME
+    $safeUsername = Escape-BashSingleQuote -Value $Username
     $wslSshSource = "/mnt/c/Users/$winUsername/.ssh"
 
-    $result = wsl -d $WslName -u $Username -- bash -c "mkdir -p ~/.ssh && cp '$wslSshSource'/id_* ~/.ssh/ 2>/dev/null; [ -f '$wslSshSource/known_hosts' ] && cp '$wslSshSource/known_hosts' ~/.ssh/ 2>/dev/null; chmod 700 ~/.ssh && chmod 600 ~/.ssh/id_* 2>/dev/null; true" 2>&1
+    # Pass commands via stdin to avoid injection
+    $bashCmd = @"
+set -e
+mkdir -p /home/$safeUsername/.ssh
+cp '$wslSshSource'/id_* /home/$safeUsername/.ssh/ 2>/dev/null || true
+[ -f '$wslSshSource/known_hosts' ] && cp '$wslSshSource/known_hosts' /home/$safeUsername/.ssh/ 2>/dev/null || true
+chmod 700 /home/$safeUsername/.ssh
+chmod 600 /home/$safeUsername/.ssh/id_* 2>/dev/null || true
+true
+"@
+
+    $result = $bashCmd | wsl -d $WslName -- bash 2>&1
 
     if ($LASTEXITCODE -eq 0) {
         Write-Status "SSH keys copied to WSL instance" "ok"
@@ -431,7 +474,7 @@ function Start-RestoreNewWSL {
     # List existing distributions
     Write-Section "Existing WSL Instances"
     Write-Host ""
-    
+
     $existingDistros = Get-WSLDistributions
     if ($existingDistros) {
         foreach ($distro in $existingDistros) {
@@ -440,28 +483,34 @@ function Start-RestoreNewWSL {
     } else {
         Write-Host "        (none)" -ForegroundColor DarkGray
     }
-    
+
     # Get new instance name
     Write-Section "New WSL Instance"
     Write-Host ""
-    
+
     $wslName = ""
     do {
         $wslName = Read-Input "Enter name for new WSL instance"
-        
+
         if ([string]::IsNullOrWhiteSpace($wslName)) {
             Write-Host "        Name is required" -ForegroundColor Yellow
             continue
         }
-        
+
+        if (-not (Test-SafeWslName -Name $wslName)) {
+            Write-Host "        Name contains invalid characters. Use only letters, numbers, underscores, and hyphens." -ForegroundColor Yellow
+            $wslName = ""
+            continue
+        }
+
         if (Test-WSLDistributionExists $wslName) {
             Write-Host "        '$wslName' already exists! Choose a different name." -ForegroundColor Yellow
             $wslName = ""
         }
     } while ([string]::IsNullOrWhiteSpace($wslName))
-    
+
     Write-Status "Name '$wslName' is available" "ok"
-    
+
     # Create WSL instance
     Write-Section "Creating WSL Instance"
     Write-Host ""
@@ -491,10 +540,22 @@ function Start-RestoreNewWSL {
     Write-Section "User Setup"
     Write-Host ""
 
-    $username = Read-Input "Enter username"
+    $username = ""
+    do {
+        $username = Read-Input "Enter username"
+        if ([string]::IsNullOrWhiteSpace($username)) {
+            Write-Host "        Username is required" -ForegroundColor Yellow
+        } elseif (-not ($username -match '^[a-z_][a-z0-9_-]*$')) {
+            Write-Host "        Invalid username. Use lowercase letters, numbers, underscores, and hyphens." -ForegroundColor Yellow
+            $username = ""
+        }
+    } while ([string]::IsNullOrWhiteSpace($username))
 
     $securePassword = $null
     $secureConfirmPassword = $null
+    $password = $null
+    $confirmPassword = $null
+
     do {
         $securePassword = Read-SecurePassword "Enter password"
         $secureConfirmPassword = Read-SecurePassword "Confirm password"
@@ -512,56 +573,60 @@ function Start-RestoreNewWSL {
     Write-Host "    Creating user..." -ForegroundColor Gray
 
     if (-not $DryRun) {
+        $safeUsername = Escape-BashSingleQuote -Value $username
+        $safePassword = Escape-BashSingleQuote -Value $password
+
         try {
-            $result = wsl -d $wslName -- bash -c "useradd -m -s /bin/bash -G sudo '$username' 2>&1"
+            # Create user with proper escaping
+            $useraddCmd = "useradd -m -s /bin/bash -G sudo '${safeUsername}'"
+            $result = wsl -d $wslName -- bash -c $useraddCmd 2>&1
             if ($LASTEXITCODE -ne 0) {
                 Write-Status "Failed to create user: $result" "error"
                 return
             }
 
-            $result = wsl -d $wslName -- bash -c "echo '${username}:${password}' | chpasswd 2>&1"
+            # Set password via stdin to avoid command line exposure
+            $chpasswdInput = "${safeUsername}:${safePassword}"
+            $chpasswdInput | wsl -d $wslName -- chpasswd 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Status "Failed to set password: $result" "error"
+                Write-Status "Failed to set password" "error"
                 return
             }
 
-            $result = wsl -d $wslName -- bash -c "echo '[user]' > /etc/wsl.conf; echo 'default=$username' >> /etc/wsl.conf 2>&1"
+            # Configure default user in wsl.conf via heredoc
+            $wslConfCmd = @"
+cat > /etc/wsl.conf << 'EOF'
+[user]
+default=${safeUsername}
+EOF
+"@
+            wsl -d $wslName -- bash -c $wslConfCmd 2>&1 | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Status "Failed to configure default user: $result" "error"
-                return
+                Write-Status "Failed to configure default user" "warn"
             }
 
-            wsl -d $wslName -- bash -c "echo '$username ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$username && chmod 440 /etc/sudoers.d/$username" 2>&1 | Out-Null
+            # Add NOPASSWD sudoers rule
+            $sudoersCmd = "echo '${safeUsername} ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/${safeUsername} && chmod 440 /etc/sudoers.d/${safeUsername}"
+            wsl -d $wslName -- bash -c $sudoersCmd 2>&1 | Out-Null
 
             # Restart WSL to apply user
-            $result = wsl --terminate $wslName 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                Write-Status "Failed to restart WSL instance" "warn"
-            }
+            wsl --terminate $wslName 2>&1 | Out-Null
             Start-Sleep -Seconds 3
         } finally {
-            if ($password) {
-                $password = $null
-            }
-            if ($confirmPassword) {
-                $confirmPassword = $null
-            }
+            # Secure cleanup
+            $password = $null
+            $confirmPassword = $null
             if ($securePassword) {
                 $securePassword.Dispose()
+                $securePassword = $null
             }
             if ($secureConfirmPassword) {
                 $secureConfirmPassword.Dispose()
+                $secureConfirmPassword = $null
             }
         }
-        wsl -d $wslName -- bash -c "useradd -m -s /bin/bash -G sudo $username 2>/dev/null; echo '${username}:${password}' | chpasswd" 2>&1 | Out-Null
-        wsl -d $wslName -- bash -c "echo '[user]' > /etc/wsl.conf; echo 'default=$username' >> /etc/wsl.conf" 2>&1 | Out-Null
-        wsl -d $wslName -- bash -c "echo '$username ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/$username && chmod 440 /etc/sudoers.d/$username" 2>&1 | Out-Null
-
-        # Restart WSL to apply user
-        wsl --terminate $wslName 2>&1 | Out-Null
-        Start-Sleep -Seconds 2
     }
-    
+
     Write-Status "User '$username' created with sudo privileges" "ok"
 
     if (-not $DryRun) {
@@ -573,11 +638,11 @@ function Start-RestoreNewWSL {
     Write-Host ""
     Write-Host "    Executing restore script inside new WSL..." -ForegroundColor Gray
     Write-Host ""
-    
+
     if (-not $DryRun) {
         wsl -d $wslName -u $username -- bash -lc "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore"
         $exitCode = $LASTEXITCODE
-        
+
         Write-Host ""
         if ($exitCode -ne 0) {
             Write-Status "Restore failed with exit code: $exitCode" "error"
@@ -585,52 +650,52 @@ function Start-RestoreNewWSL {
             Write-Status "Restore completed successfully" "ok"
         }
     }
-    
+
     # Success
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════════════════════════╗" -ForegroundColor Green
-    Write-Host "  ║                                                              ║" -ForegroundColor Green
-    Write-Host "  ║   RESTORE COMPLETE!                                         ║" -ForegroundColor Green
-    Write-Host "  ║                                                              ║" -ForegroundColor Green
-    Write-Host "  ║   Your new WSL instance is ready:                           ║" -ForegroundColor Green
-    Write-Host "  ║   wsl -d $wslName" -ForegroundColor White
-    Write-Host "  ║                                                              ║" -ForegroundColor Green
-    Write-Host "  ║   Or set it as default:                                     ║" -ForegroundColor Green
-    Write-Host "  ║   wsl --set-default $wslName" -ForegroundColor White
-    Write-Host "  ║                                                              ║" -ForegroundColor Green
-    Write-Host "  ╚══════════════════════════════════════════════════════════════╝" -ForegroundColor Green
+    Write-Host "  +================================================================+" -ForegroundColor Green
+    Write-Host "  |                                                                |" -ForegroundColor Green
+    Write-Host "  |   RESTORE COMPLETE!                                            |" -ForegroundColor Green
+    Write-Host "  |                                                                |" -ForegroundColor Green
+    Write-Host "  |   Your new WSL instance is ready:                              |" -ForegroundColor Green
+    Write-Host "  |   wsl -d $wslName" -ForegroundColor White
+    Write-Host "  |                                                                |" -ForegroundColor Green
+    Write-Host "  |   Or set it as default:                                        |" -ForegroundColor Green
+    Write-Host "  |   wsl --set-default $wslName" -ForegroundColor White
+    Write-Host "  |                                                                |" -ForegroundColor Green
+    Write-Host "  +================================================================+" -ForegroundColor Green
     Write-Host ""
 }
 
 function Start-RestoreExistingWSL {
     $distros = Get-WSLDistributions
-    
+
     if (-not $distros -or $distros.Count -eq 0) {
         Write-Status "No WSL distributions found" "error"
         return
     }
-    
+
     Write-Section "Select WSL Distribution"
     Write-Host ""
-    
+
     $distroList = @($distros)
     $choice = Read-Choice "Choose distribution to restore to" $distroList 1
     $selectedDistro = $distroList[$choice - 1]
-    
+
     Write-Host ""
     Write-Host "    WARNING: This will modify '$selectedDistro'" -ForegroundColor Yellow
-    
+
     if (-not (Read-YesNo "Are you sure?" $false)) {
         Write-Host "    Restore cancelled." -ForegroundColor Yellow
         return
     }
-    
+
     Write-Section "Running Restore"
     Write-Host ""
-    
+
     wsl -d $selectedDistro -- bash -lc "python3 <(curl -sL $Script:GITHUB_RAW/run.py) restore"
     $exitCode = $LASTEXITCODE
-    
+
     Write-Host ""
     if ($exitCode -ne 0) {
         Write-Status "Restore failed with exit code: $exitCode" "error"
@@ -640,28 +705,78 @@ function Start-RestoreExistingWSL {
 }
 
 #===============================================================================
+# Sync Command
+#===============================================================================
+
+function Start-Sync {
+    Write-Banner
+    Write-Header "Sync Shell Environment"
+
+    if (-not (Test-Dependencies)) {
+        return
+    }
+
+    # Get available WSL distributions
+    $distros = Get-WSLDistributions
+
+    if (-not $distros -or $distros.Count -eq 0) {
+        Write-Status "No WSL distributions found" "error"
+        Write-Host ""
+        Write-Host "    Install a WSL distribution first:" -ForegroundColor Yellow
+        Write-Host "    wsl --install Ubuntu" -ForegroundColor White
+        Write-Host ""
+        return
+    }
+
+    Write-Section "Select WSL Distribution"
+    Write-Host ""
+    Write-Host "    Available distributions:" -ForegroundColor White
+
+    $distroList = @($distros)
+    $choice = Read-Choice "Choose distribution to sync" $distroList 1
+    $selectedDistro = $distroList[$choice - 1]
+
+    Write-Status "Selected: $selectedDistro" "info"
+
+    # Run sync script inside WSL with real-time output
+    Write-Section "Running Sync"
+    Write-Host ""
+
+    wsl -d $selectedDistro -- bash -lc "python3 <(curl -sL $Script:GITHUB_RAW/run.py) sync"
+    $exitCode = $LASTEXITCODE
+
+    Write-Host ""
+    if ($exitCode -ne 0) {
+        Write-Status "Sync failed with exit code: $exitCode" "error"
+    } else {
+        Write-Status "Sync completed successfully" "ok"
+    }
+}
+
+#===============================================================================
 # Help & Version
 #===============================================================================
 
 function Show-Help {
     Write-Banner
-    
+
     Write-Host "USAGE" -ForegroundColor Yellow
     Write-Host "    .\shellpack.ps1 <command> [options]"
     Write-Host ""
-    
+
     Write-Host "COMMANDS" -ForegroundColor Yellow
     Write-Host "    backup              Backup WSL shell environment"
     Write-Host "    restore             Restore to new or existing WSL"
+    Write-Host "    sync                Sync shell environment from backup"
     Write-Host "    help                Show this help message"
     Write-Host "    version             Show version information"
     Write-Host ""
-    
+
     Write-Host "OPTIONS" -ForegroundColor Yellow
     Write-Host "    -DryRun             Show what would be done"
     Write-Host "    -Verbose            Enable verbose output"
     Write-Host ""
-    
+
     Write-Host "EXAMPLES" -ForegroundColor Yellow
     Write-Host "    # Run from GitHub (interactive menu)"
     Write-Host "    iex (irm $Script:GITHUB_RAW/shellpack.ps1)" -ForegroundColor Gray
@@ -672,7 +787,10 @@ function Show-Help {
     Write-Host "    # Restore to new WSL instance"
     Write-Host "    .\shellpack.ps1 restore" -ForegroundColor Gray
     Write-Host ""
-    
+    Write-Host "    # Sync"
+    Write-Host "    .\shellpack.ps1 sync" -ForegroundColor Gray
+    Write-Host ""
+
     Write-Host "MORE INFO" -ForegroundColor Yellow
     Write-Host "    Repository: $Script:GITHUB_REPO"
     Write-Host "    Version:    $Script:VERSION"
@@ -689,19 +807,21 @@ function Show-Version {
 
 function Show-Menu {
     Write-Banner
-    
+
     Write-Host "    What would you like to do?" -ForegroundColor White
-    
+
     $choice = Read-Choice "Select action" @(
         "Backup WSL environment",
         "Restore to WSL",
+        "Sync WSL environment",
         "Show help"
     ) 1
-    
+
     switch ($choice) {
         1 { Start-Backup }
         2 { Start-Restore }
-        3 { Show-Help }
+        3 { Start-Sync }
+        4 { Show-Help }
     }
 }
 
@@ -715,6 +835,7 @@ if ([string]::IsNullOrWhiteSpace($Action)) {
     switch ($Action) {
         'backup'  { Start-Backup }
         'restore' { Start-Restore }
+        'sync'    { Start-Sync }
         'help'    { Show-Help }
         'version' { Show-Version }
     }

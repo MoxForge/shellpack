@@ -12,11 +12,14 @@ import tempfile
 import re
 import time
 import atexit
+import shlex
+import tarfile
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 SCRIPT_NAME = "shellpack"
 GITHUB_REPO = "https://github.com/MoxForge/shellpack"
 
@@ -49,7 +52,17 @@ class Config:
 
 
 config = Config()
-rollback_stack: List[str] = []
+
+
+@dataclass
+class RollbackAction:
+    func: Callable
+    args: Tuple[Any, ...] = field(default_factory=tuple)
+    kwargs: Dict[str, Any] = field(default_factory=dict)
+    description: str = ""
+
+
+rollback_stack: List[RollbackAction] = []
 
 
 def log(level: str, message: str):
@@ -144,20 +157,20 @@ def read_yes_no(prompt: str, default: bool = True) -> bool:
         return default
 
 
-def read_choice(prompt: str, options: List[str]) -> int:
+def read_choice(prompt: str, options: List[str], default: int = 1) -> int:
     print()
     for i, opt in enumerate(options):
         print(f"      {Colors.GRAY}[{i + 1}]{Colors.NC} {opt}")
     print()
     while True:
-        display = f"  {Colors.CYAN}{prompt}{Colors.NC} [{Colors.GRAY}1{Colors.NC}]: "
+        display = f"  {Colors.CYAN}{prompt}{Colors.NC} [{Colors.GRAY}{default}{Colors.NC}]: "
         try:
             result = input(display).strip()
         except (EOFError, KeyboardInterrupt):
             print()
-            return 1
+            return default
         if not result:
-            return 1
+            return default
         if result.isdigit() and 1 <= int(result) <= len(options):
             return int(result)
         print_error(f"Invalid choice. Please enter 1-{len(options)}")
@@ -174,6 +187,11 @@ def read_password(prompt: str) -> str:
 
 def validate_git_url(url: str) -> bool:
     if not url:
+        return False
+    # Reject dangerous schemes explicitly
+    dangerous_schemes = ("file://", "javascript:", "data:", "vbscript:")
+    url_lower = url.lower()
+    if any(url_lower.startswith(s) for s in dangerous_schemes):
         return False
     patterns = [
         r"^(https?|git|ssh)://[a-zA-Z0-9._-]+(/[a-zA-Z0-9._/-]+)?\.git$",
@@ -192,7 +210,7 @@ def sanitize_name(name: str) -> str:
     name = re.sub(r"\.\.+", ".", name)
     if len(name) > 100:
         name = name[:100]
-    if not name:
+    if not name or name == ".":
         name = f"backup-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
     return name
 
@@ -293,6 +311,19 @@ def calculate_checksum(directory: Path) -> str:
     return hasher.hexdigest()
 
 
+def verify_checksum(directory: Path, expected: str) -> bool:
+    """Verify that the SHA-256 checksum of directory matches expected."""
+    if not expected:
+        log("WARN", "No expected checksum provided; skipping verification")
+        return True
+    actual = calculate_checksum(directory)
+    if actual != expected:
+        log("ERROR", f"Checksum mismatch: expected {expected}, got {actual}")
+        return False
+    log("INFO", "Checksum verification passed")
+    return True
+
+
 def check_dependencies() -> bool:
     print_section("Checking Dependencies")
     print()
@@ -357,6 +388,9 @@ def clone_repo(repo_url: str, dest_dir: Path, depth: int = 1) -> bool:
     if config.dry_run:
         print_status(f"[DRY RUN] Would clone: {repo_url}", "info")
         return True
+    if dest_dir.exists() and any(dest_dir.iterdir()):
+        log("WARN", f"Destination {dest_dir} exists and is not empty; removing")
+        shutil.rmtree(dest_dir, ignore_errors=True)
     log("INFO", f"Cloning repository: {repo_url} -> {dest_dir}")
     rc, _, err = run_command(["git", "clone", "--depth", str(depth), repo_url, str(dest_dir)], check=False)
     if rc == 0:
@@ -368,7 +402,7 @@ def clone_repo(repo_url: str, dest_dir: Path, depth: int = 1) -> bool:
 
 def init_repo(dest_dir: Path, repo_url: str) -> bool:
     dest_dir.mkdir(parents=True, exist_ok=True)
-    rc, _, _ = run_command(["git", "init"], capture=True, check=False)
+    rc, _, _ = run_command(["git", "init", str(dest_dir)], capture=True, check=False)
     if rc != 0:
         return False
     run_command(["git", "-C", str(dest_dir), "remote", "add", "origin", repo_url], check=False)
@@ -458,7 +492,9 @@ def generate_ssh_key(email: str, key_type: str = "ed25519", passphrase: str = ""
     ssh_dir = config.home / ".ssh"
     ssh_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     key_file = ssh_dir / f"id_{key_type}"
-    cmd = ["ssh-keygen", "-t", key_type, "-C", email, "-f", str(key_file), "-N", passphrase]
+    # Do not pass passphrase on command line (visible in ps). Generate without passphrase;
+    # user can add one interactively with ssh-keygen -p afterward.
+    cmd = ["ssh-keygen", "-t", key_type, "-C", email, "-f", str(key_file), "-N", ""]
     rc, _, _ = run_command(cmd, check=False)
     if rc == 0:
         key_file.chmod(0o600)
@@ -470,6 +506,8 @@ def generate_ssh_key(email: str, key_type: str = "ed25519", passphrase: str = ""
         print(f"  {Colors.GRAY}{pub_key}{Colors.NC}")
         print()
         print(f"  {Colors.YELLOW}Add this key to GitHub/GitLab/Bitbucket to enable SSH access.{Colors.NC}")
+        if passphrase:
+            print_warning("Passphrase was ignored for security. Use 'ssh-keygen -p' to add one interactively.")
         return True
     print_error("Failed to generate SSH key")
     return False
@@ -526,9 +564,9 @@ def read_manifest(manifest_path: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
-def add_rollback_action(action: str):
-    rollback_stack.append(action)
-    log("DEBUG", f"Added rollback action: {action}")
+def add_rollback_action(func: Callable, *args, description: str = "", **kwargs):
+    rollback_stack.append(RollbackAction(func=func, args=args, kwargs=kwargs, description=description))
+    log("DEBUG", f"Added rollback action: {description or func.__name__}")
 
 
 def execute_rollback():
@@ -537,11 +575,12 @@ def execute_rollback():
     print_section("Rolling Back Changes")
     print()
     for action in reversed(rollback_stack):
-        log("INFO", f"Executing rollback: {action}")
+        desc = action.description or action.func.__name__
+        log("INFO", f"Executing rollback: {desc}")
         try:
-            subprocess.run(action, shell=True, capture_output=True)
-        except Exception:
-            pass
+            action.func(*action.args, **action.kwargs)
+        except Exception as e:
+            log("WARN", f"Rollback action failed: {desc}: {e}")
     rollback_stack.clear()
     print_status("Rollback completed", "ok")
 
@@ -572,6 +611,12 @@ def copy_file(src: Path, dest: Path) -> bool:
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
+        if not dest.exists():
+            log("ERROR", f"Copy verification failed: {dest} does not exist after copy")
+            return False
+        if dest.stat().st_size != src.stat().st_size:
+            log("ERROR", f"Copy verification failed: size mismatch {src} -> {dest}")
+            return False
         return True
     except Exception as e:
         log("ERROR", f"Failed to copy {src} -> {dest}: {e}")
@@ -580,10 +625,29 @@ def copy_file(src: Path, dest: Path) -> bool:
 
 def copy_directory(src: Path, dest: Path) -> bool:
     try:
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.copytree(src, dest)
+        if not src.exists():
+            log("ERROR", f"Source directory does not exist: {src}")
+            return False
+        shutil.copytree(src, dest, dirs_exist_ok=True)
         return True
     except Exception as e:
         log("ERROR", f"Failed to copy directory {src} -> {dest}: {e}")
+        return False
+
+
+def safe_extract_tar(archive: Path, dest: Path) -> bool:
+    """Extract a tar archive safely, rejecting path traversal members."""
+    try:
+        dest = dest.resolve()
+        with tarfile.open(archive, "r:gz") as tar:
+            for member in tar.getmembers():
+                member_path = (dest / member.name).resolve()
+                if not str(member_path).startswith(str(dest) + os.sep) and str(member_path) != str(dest):
+                    log("ERROR", f"Tar member path traversal blocked: {member.name}")
+                    print_error(f"Blocked path traversal in archive: {member.name}")
+                    return False
+            tar.extractall(path=str(dest))
+        return True
+    except Exception as e:
+        log("ERROR", f"Tar extraction failed: {e}")
         return False

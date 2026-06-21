@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import shutil
-import tarfile
 from pathlib import Path
 from typing import List
 
@@ -11,10 +10,10 @@ from shellpack.core import (
     read_input, read_yes_no, read_choice,
     run_command, command_exists,
     detect_os, detect_package_manager,
-    check_dependencies, read_manifest,
+    check_dependencies, read_manifest, verify_checksum,
     clone_repo, verify_ssh_connection,
     set_ssh_permissions, generate_ssh_key,
-    copy_file,
+    copy_file, safe_extract_tar,
 )
 
 
@@ -28,12 +27,10 @@ def restore_fish(src_dir: Path) -> None:
         return
     dest = config.home / ".config"
     dest.mkdir(parents=True, exist_ok=True)
-    try:
-        with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(path=str(dest))
+    if safe_extract_tar(archive, dest):
         print_status("Fish config", "ok")
-    except Exception as e:
-        print_error(f"Fish restore failed: {e}")
+    else:
+        print_error("Fish restore failed")
 
 
 def restore_bash(src_dir: Path) -> None:
@@ -63,12 +60,12 @@ def restore_zsh(src_dir: Path) -> None:
     omz_archive = src_dir / "shells" / "zsh" / "ohmyzsh.tar.gz"
     if omz_archive.is_file():
         if not config.dry_run:
-            try:
-                with tarfile.open(omz_archive, "r:gz") as tar:
-                    tar.extractall(path=str(config.home))
-            except Exception as e:
-                log("WARN", f"Oh-My-Zsh restore failed: {e}")
-        print_status("Zsh config + Oh-My-Zsh", "ok")
+            if safe_extract_tar(omz_archive, config.home):
+                print_status("Zsh config + Oh-My-Zsh", "ok")
+            else:
+                log("WARN", "Oh-My-Zsh restore failed")
+        else:
+            print_status("[DRY RUN] Would restore Oh-My-Zsh", "info")
     elif found > 0:
         print_status(f"Zsh config ({found} files)", "ok")
     else:
@@ -152,14 +149,12 @@ def restore_ssh(src_dir: Path) -> bool:
     if config.dry_run:
         print_status("[DRY RUN] Would restore SSH keys", "info")
         return True
-    try:
-        with tarfile.open(archive, "r:gz") as tar:
-            tar.extractall(path=str(config.home))
+    if safe_extract_tar(archive, config.home):
         set_ssh_permissions()
         print_status("SSH keys", "ok")
         return True
-    except Exception as e:
-        print_error(f"SSH restore failed: {e}")
+    else:
+        print_error("SSH restore failed")
         return False
 
 
@@ -195,15 +190,35 @@ def restore_conda(src_dir: Path, os_name: str, arch: str) -> None:
             run_command([conda_bin, "init", shell], check=False, timeout=10)
 
     count = 0
+    skipped = 0
     for yml in yml_files:
         env_name = yml.stem
         if env_name == "base":
             continue
         if not config.dry_run:
+            # Check if environment already exists
+            rc, _, _ = run_command([conda_bin, "env", "list"], capture=True, check=False)
+            env_exists = False
+            if rc == 0:
+                # conda env list output format: name * path
+                # We check if env_name appears as a standalone word in the output
+                import re as _re
+                env_list_out, _, _ = run_command([conda_bin, "env", "list"], capture=True, check=False)
+                # Simple check: look for the env name at the start of a line or after spaces
+                env_exists = bool(_re.search(rf"(^|\s){_re.escape(env_name)}(\s|$)", env_list_out))
+            if env_exists:
+                log("INFO", f"Conda environment '{env_name}' already exists; skipping")
+                skipped += 1
+                continue
             run_command([conda_bin, "env", "create", "-f", str(yml), "-n", env_name], check=False, timeout=300)
-        count += 1
+            count += 1
+        else:
+            count += 1
 
-    print_status(f"Conda environments ({count})", "ok")
+    if skipped > 0:
+        print_status(f"Conda environments ({count} created, {skipped} skipped existing)", "ok")
+    else:
+        print_status(f"Conda environments ({count})", "ok")
 
 
 def restore_history(src_dir: Path) -> None:
@@ -256,9 +271,8 @@ def restore_cloud_creds(src_dir: Path) -> None:
         if archive.is_file():
             try:
                 extract_to.mkdir(parents=True, exist_ok=True)
-                with tarfile.open(archive, "r:gz") as tar:
-                    tar.extractall(path=str(extract_to))
-                found += 1
+                if safe_extract_tar(archive, extract_to):
+                    found += 1
             except Exception as e:
                 log("WARN", f"Cloud creds restore failed for {name}: {e}")
     if found > 0:
@@ -324,7 +338,8 @@ def set_default_shell(shell: str) -> None:
         return
     rc, _, _ = run_command(["grep", "-q", shell_path, "/etc/shells"], check=False)
     if rc != 0:
-        run_command(["sudo", "tee", "-a", "/etc/shells"], check=False)
+        # Fix: pipe shell_path into tee via stdin
+        run_command(["sudo", "tee", "-a", "/etc/shells"], check=False, input=shell_path + "\n")
     rc, _, _ = run_command(["chsh", "-s", shell_path], check=False)
     if rc == 0:
         print_status(f"Default shell set to {shell}", "ok")
@@ -406,6 +421,16 @@ def do_restore() -> None:
             print_item(f"Created: {manifest.get('created', 'unknown')}")
             source = manifest.get("source", {})
             print_item(f"Source: {source.get('hostname', 'unknown')} ({source.get('os', 'unknown')})")
+            # Verify checksum
+            expected_checksum = manifest.get("checksum", "")
+            if expected_checksum:
+                print(f"  {Colors.GRAY}Verifying backup integrity...{Colors.NC}")
+                if verify_checksum(backup_dir, expected_checksum):
+                    print_status("Backup integrity verified", "ok")
+                else:
+                    print_error("Backup integrity check FAILED - backup may be corrupted!")
+                    if not read_yes_no("Continue anyway?", False):
+                        raise SystemExit(1)
 
     print()
     if not read_yes_no("Continue with restore?", True):
